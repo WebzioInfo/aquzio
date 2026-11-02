@@ -95,6 +95,22 @@ Log.Information("    ConnectionStrings:TenantConnection: {EnvVar}", builder.Conf
 Log.Information("--------------------------------------------------");
 
 // Add Clean Architecture Layers
+// Validate Biodrops External Integration Configuration at application startup
+var biodropsValidation = Aquora.Application.Services.BiodropsConfigurationValidator.Validate(builder.Configuration, builder.Environment.IsProduction());
+if (!biodropsValidation.IsValid)
+{
+    Log.Warning("[BIODROPS CONFIG AUDIT] Configuration validation warning: {ErrorMessage}", biodropsValidation.ErrorMessage);
+    if (builder.Environment.IsProduction())
+    {
+        Log.Error("[BIODROPS SECURITY CRITICAL] Integration API key missing or invalid in Production environment. Set 'Integration__Biodrops__ApiKey'. External integration requests will be safely rejected.");
+    }
+}
+else
+{
+    Log.Information("[BIODROPS CONFIG AUDIT] Biodrops integration status: {Status}",
+        biodropsValidation.IsConfigured ? "Configured (API key active)" : "Unconfigured (integration requests will fail safe)");
+}
+
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
 builder.Services.AddPersistence(builder.Configuration);
@@ -128,15 +144,22 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
 
         // Dedicated Rate Limiting Policy for Biodrops External Integration
         options.AddPolicy("BiodropsIntegrationPolicy", httpContext =>
-            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
-                partitionKey: httpContext.Request.Headers["X-API-Key"].ToString() is { Length: > 0 } k ? k : (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
-                factory: partition => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+        {
+            var headerKey = httpContext.Request.Headers["X-API-Key"].ToString();
+            var partitionKey = !string.IsNullOrWhiteSpace(headerKey)
+                ? "key_" + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(headerKey.Trim())))[..12]
+                : "ip_" + (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown");
+
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: partitionKey,
+                factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
                 {
                     AutoReplenishment = true,
                     PermitLimit = 120,
                     QueueLimit = 0,
                     Window = TimeSpan.FromMinutes(1)
-                }));
+                });
+        });
     });
 
     // Configure Forwarded Headers for Reverse Proxy (Nginx / Cloudflare / Docker)

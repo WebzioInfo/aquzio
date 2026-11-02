@@ -14,11 +14,8 @@ namespace Aquora.Application.Services
         private readonly IConfiguration _configuration;
         private readonly ILogger<BiodropsIntegrationAuthService> _logger;
 
-        // In-memory revocation tracking: Key/Fingerprint -> Reason
-        private static readonly ConcurrentDictionary<string, string> _revokedKeys = new(StringComparer.OrdinalIgnoreCase);
-
-        // Fallback default key for local development and test environments if no env var is set
-        public const string DefaultDevelopmentApiKey = "biodrops_live_secret_key_2026";
+        // In-memory revocation tracking: Key/FingerprintHex -> (HashBytes, Reason)
+        private static readonly ConcurrentDictionary<string, (byte[] HashBytes, string Reason)> _revokedFingerprints = new(StringComparer.OrdinalIgnoreCase);
 
         public BiodropsIntegrationAuthService(
             IConfiguration configuration,
@@ -27,22 +24,40 @@ namespace Aquora.Application.Services
             _configuration = configuration;
             _logger = logger;
 
+            // Automatically blacklist the compromised legacy key fingerprint
+            BlacklistCompromisedLegacyKey();
             LoadConfiguredRevocations();
+        }
+
+        public bool IsConfigured
+        {
+            get
+            {
+                var keys = GetConfiguredValidKeys();
+                return keys.Count > 0;
+            }
+        }
+
+        private void BlacklistCompromisedLegacyKey()
+        {
+            var legacyHashHex = BiodropsConfigurationValidator.RevokedLegacyKeySha256;
+            var legacyHashBytes = Convert.FromHexString(legacyHashHex);
+            _revokedFingerprints.TryAdd(legacyHashHex, (legacyHashBytes, "Legacy exposed key fingerprint permanently revoked and blacklisted."));
         }
 
         private void LoadConfiguredRevocations()
         {
-            var revokedConfig = _configuration["BIODROPS_REVOKED_API_KEYS"] 
-                ?? _configuration["Integration:Biodrops:RevokedKeys"];
+            var revokedConfig = _configuration["Integration:Biodrops:RevokedKeys"]
+                ?? _configuration["Integration__Biodrops__RevokedKeys"]
+                ?? _configuration["BIODROPS_REVOKED_API_KEYS"];
 
             if (!string.IsNullOrWhiteSpace(revokedConfig))
             {
-                var keys = revokedConfig.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var k in keys)
+                var entries = revokedConfig.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                foreach (var entry in entries)
                 {
-                    var cleanKey = k.Trim();
-                    _revokedKeys.TryAdd(cleanKey, "Revoked via configuration");
-                    _revokedKeys.TryAdd(ComputeSha256Fingerprint(cleanKey), "Revoked via configuration");
+                    var clean = entry.Trim();
+                    AddRevocationEntry(clean, "Revoked via configuration");
                 }
             }
         }
@@ -60,16 +75,25 @@ namespace Aquora.Application.Services
 
             var cleanKey = apiKey.Trim();
 
-            // 1. Check for credential revocation
-            if (IsApiKeyRevoked(cleanKey))
+            // 1. Hash incoming credential before revocation lookup using SHA-256
+            var incomingHashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(cleanKey));
+
+            // Check for credential revocation using constant-time comparison across stored fingerprints
+            if (IsHashBytesRevoked(incomingHashBytes, out var revocationReason))
             {
-                var reason = _revokedKeys.TryGetValue(cleanKey, out var r) ? r : "API key has been revoked";
-                _logger.LogWarning("[INTEGRATION SECURITY AUDIT] Authentication rejected: Revoked API key used from IP: {IpAddress}, Path: {Path}. Reason: {Reason}", ip, path, reason);
+                _logger.LogWarning("[INTEGRATION SECURITY AUDIT] Authentication rejected: Revoked API credential used from IP: {IpAddress}, Path: {Path}. Reason: {Reason}", ip, path, revocationReason);
                 return BiodropsAuthResult.Revoked("The provided API key has been revoked.");
             }
 
             // 2. Resolve configured valid keys
             var validKeys = GetConfiguredValidKeys();
+
+            // Fail safely if no keys are configured in the environment
+            if (validKeys.Count == 0)
+            {
+                _logger.LogWarning("[INTEGRATION SECURITY AUDIT] Authentication failed: No integration API key is configured on the server. External request rejected. Client IP: {IpAddress}, Path: {Path}", ip, path);
+                return BiodropsAuthResult.Failure("API key authentication is not configured on the server.");
+            }
 
             // 3. Validate against configured keys using constant-time comparison
             var providedBytes = Encoding.UTF8.GetBytes(cleanKey);
@@ -86,32 +110,74 @@ namespace Aquora.Application.Services
                 }
             }
 
-            _logger.LogWarning("[INTEGRATION SECURITY AUDIT] Authentication failed: Invalid API key attempt from IP: {IpAddress}, Path: {Path}", ip, path);
+            _logger.LogWarning("[INTEGRATION SECURITY AUDIT] Authentication failed: Invalid API credential attempt from IP: {IpAddress}, Path: {Path}", ip, path);
             return BiodropsAuthResult.Failure("Invalid API key.");
         }
 
-        public void RevokeApiKey(string apiKeyOrKeyId, string reason)
+        public void RevokeApiKey(string apiKeyOrFingerprint, string reason)
         {
-            if (string.IsNullOrWhiteSpace(apiKeyOrKeyId)) return;
+            if (string.IsNullOrWhiteSpace(apiKeyOrFingerprint)) return;
 
-            var clean = apiKeyOrKeyId.Trim();
-            _revokedKeys.TryAdd(clean, reason);
-            _revokedKeys.TryAdd(ComputeSha256Fingerprint(clean), reason);
+            var clean = apiKeyOrFingerprint.Trim();
+            AddRevocationEntry(clean, reason);
 
-            var fp = ComputeSha256Fingerprint(clean);
-            var prefix = fp.Length >= 10 ? fp.Substring(0, 10) : fp;
-            _logger.LogWarning("[INTEGRATION SECURITY AUDIT] API key '{Fingerprint}...' revoked. Reason: {Reason}", prefix, reason);
+            _logger.LogWarning("[INTEGRATION SECURITY AUDIT] Credential revoked. Reason: {Reason}", reason);
         }
 
-        public bool IsApiKeyRevoked(string apiKeyOrKeyId)
+        public bool IsApiKeyRevoked(string apiKeyOrFingerprint)
         {
-            if (string.IsNullOrWhiteSpace(apiKeyOrKeyId)) return false;
+            if (string.IsNullOrWhiteSpace(apiKeyOrFingerprint)) return false;
 
-            var clean = apiKeyOrKeyId.Trim();
-            if (_revokedKeys.ContainsKey(clean)) return true;
+            var clean = apiKeyOrFingerprint.Trim();
+            byte[] hashBytes;
 
-            var fingerprint = ComputeSha256Fingerprint(clean);
-            return _revokedKeys.ContainsKey(fingerprint);
+            // If clean is already a 64-hex char SHA-256 fingerprint
+            if (clean.Length == 64 && IsHexString(clean))
+            {
+                hashBytes = Convert.FromHexString(clean);
+            }
+            else
+            {
+                hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(clean));
+            }
+
+            return IsHashBytesRevoked(hashBytes, out _);
+        }
+
+        private bool IsHashBytesRevoked(byte[] hashBytes, out string? reason)
+        {
+            foreach (var item in _revokedFingerprints.Values)
+            {
+                if (item.HashBytes.Length == hashBytes.Length &&
+                    CryptographicOperations.FixedTimeEquals(item.HashBytes, hashBytes))
+                {
+                    reason = item.Reason;
+                    return true;
+                }
+            }
+
+            reason = null;
+            return false;
+        }
+
+        private void AddRevocationEntry(string entry, string reason)
+        {
+            byte[] hashBytes;
+            string hexKey;
+
+            // If entry is already a 64-character hex SHA-256 fingerprint
+            if (entry.Length == 64 && IsHexString(entry))
+            {
+                hexKey = entry.ToLowerInvariant();
+                hashBytes = Convert.FromHexString(entry);
+            }
+            else
+            {
+                hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(entry));
+                hexKey = Convert.ToHexString(hashBytes).ToLowerInvariant();
+            }
+
+            _revokedFingerprints.TryAdd(hexKey, (hashBytes, reason));
         }
 
         private Dictionary<string, string> GetConfiguredValidKeys()
@@ -119,12 +185,30 @@ namespace Aquora.Application.Services
             var keys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
             // Primary environment / config key
-            var primaryKey = _configuration["BIODROPS_INTEGRATION_API_KEY"] 
-                ?? _configuration["Integration:Biodrops:ApiKey"];
+            var primaryKey = _configuration["Integration:Biodrops:ApiKey"]
+                ?? _configuration["Integration__Biodrops__ApiKey"]
+                ?? _configuration["BIODROPS_INTEGRATION_API_KEY"];
 
             if (!string.IsNullOrWhiteSpace(primaryKey))
             {
-                keys["BiodropsProductionApp"] = primaryKey.Trim();
+                var cleanPrimary = primaryKey.Trim();
+                if (!IsApiKeyRevoked(cleanPrimary))
+                {
+                    keys["BiodropsProductionApp"] = cleanPrimary;
+                }
+            }
+
+            // Secondary / Rotation key for zero-downtime rotation support
+            var secondaryKey = _configuration["Integration:Biodrops:SecondaryApiKey"]
+                ?? _configuration["Integration__Biodrops__SecondaryApiKey"];
+
+            if (!string.IsNullOrWhiteSpace(secondaryKey))
+            {
+                var cleanSecondary = secondaryKey.Trim();
+                if (!IsApiKeyRevoked(cleanSecondary))
+                {
+                    keys["BiodropsRotationApp"] = cleanSecondary;
+                }
             }
 
             // Multi-client keys in configuration section Integration:Biodrops:ApiKeys
@@ -135,25 +219,28 @@ namespace Aquora.Application.Services
                 {
                     if (!string.IsNullOrWhiteSpace(child.Value))
                     {
-                        keys[child.Key] = child.Value.Trim();
+                        var cleanMulti = child.Value.Trim();
+                        if (!IsApiKeyRevoked(cleanMulti))
+                        {
+                            keys[child.Key] = cleanMulti;
+                        }
                     }
                 }
-            }
-
-            // If no key is configured anywhere, provide development fallback
-            if (keys.Count == 0)
-            {
-                keys["BiodropsDevClient"] = DefaultDevelopmentApiKey;
             }
 
             return keys;
         }
 
-        private static string ComputeSha256Fingerprint(string input)
+        private static bool IsHexString(string input)
         {
-            using var sha = SHA256.Create();
-            var bytes = sha.ComputeHash(Encoding.UTF8.GetBytes(input));
-            return Convert.ToHexString(bytes).ToLowerInvariant();
+            foreach (var c in input)
+            {
+                var isHex = (c >= '0' && c <= '9') ||
+                            (c >= 'a' && c <= 'f') ||
+                            (c >= 'A' && c <= 'F');
+                if (!isHex) return false;
+            }
+            return true;
         }
     }
 }

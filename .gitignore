@@ -44,3 +44,10 @@ dist/
 !.env.example
 !**/.env.example
 
+
+# Local ASP.NET Core secrets and settings
+appsettings*.local.json
+appsettings*.Local.json
+**/appsettings*.local.json
+**/appsettings*.Local.json
+**/secrets.json

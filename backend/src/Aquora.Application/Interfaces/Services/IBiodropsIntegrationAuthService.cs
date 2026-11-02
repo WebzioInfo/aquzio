@@ -23,6 +23,7 @@ namespace Aquora.Application.Interfaces.Services
     /// </summary>
     public interface IBiodropsIntegrationAuthService
     {
+        bool IsConfigured { get; }
         BiodropsAuthResult Authenticate(string? apiKey, string? clientIp = null, string? requestPath = null);
         void RevokeApiKey(string apiKeyOrKeyId, string reason);
         bool IsApiKeyRevoked(string apiKeyOrKeyId);

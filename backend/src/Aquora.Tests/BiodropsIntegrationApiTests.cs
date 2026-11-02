@@ -39,10 +39,12 @@ namespace Aquora.Tests
     {
         private const string TestValidApiKey = "biodrops_test_key_valid_2026";
         private const string TestRevokedApiKey = "biodrops_test_key_revoked_2026";
+        private const string CompromisedLegacyKeyPlaintext = "biodrops_live_secret_key_2026";
 
         private (PlatformDbContext PlatformDb, TenantDbContext TenantDb1, TenantDbContext TenantDb2, IServiceProvider ServiceProvider) CreateTestEnvironment(
             Guid tenant1Id,
-            Guid tenant2Id)
+            Guid tenant2Id,
+            Dictionary<string, string?>? customConfig = null)
         {
             var services = new ServiceCollection();
 
@@ -74,10 +76,10 @@ namespace Aquora.Tests
             var tenantDb1 = new TenantDbContext(tenantOptions1, mockTenantProvider.Object, mockUserContext.Object);
             var tenantDb2 = new TenantDbContext(tenantOptions2, mockTenantProvider.Object, mockUserContext.Object);
 
-            var configDict = new Dictionary<string, string?>
+            var configDict = customConfig ?? new Dictionary<string, string?>
             {
-                { "BIODROPS_INTEGRATION_API_KEY", TestValidApiKey },
-                { "BIODROPS_REVOKED_API_KEYS", TestRevokedApiKey }
+                { "Integration:Biodrops:ApiKey", TestValidApiKey },
+                { "Integration:Biodrops:RevokedKeys", TestRevokedApiKey }
             };
 
             var configuration = new ConfigurationBuilder()
@@ -693,6 +695,290 @@ namespace Aquora.Tests
             Assert.False(nextCalled);
             var objResult2 = Assert.IsType<ObjectResult>(actionExecutingContext.Result);
             Assert.Equal((int)HttpStatusCode.Forbidden, objResult2.StatusCode);
+        }
+
+        [Fact]
+        public void Authentication_ValidEnvironmentVariableKey_Succeeds()
+        {
+            // Arrange: Provide key using double underscore ASP.NET Core environment variable format
+            const string envKey = "super_secure_env_integration_key_99999";
+            var customConfig = new Dictionary<string, string?>
+            {
+                { "Integration__Biodrops__ApiKey", envKey }
+            };
+
+            var (_, _, _, sp) = CreateTestEnvironment(Guid.NewGuid(), Guid.NewGuid(), customConfig);
+            var authService = sp.GetRequiredService<IBiodropsIntegrationAuthService>();
+
+            // Act
+            var result = authService.Authenticate(envKey, "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+
+            // Assert
+            Assert.True(result.IsAuthorized);
+            Assert.Equal("BiodropsProductionApp", result.ClientName);
+        }
+
+        [Fact]
+        public void Authentication_MissingProductionKey_FailsSafelyWithoutFallback()
+        {
+            // Arrange: Empty configuration (no keys set in environment)
+            var emptyConfig = new Dictionary<string, string?>();
+            var (_, _, _, sp) = CreateTestEnvironment(Guid.NewGuid(), Guid.NewGuid(), emptyConfig);
+            var authService = sp.GetRequiredService<IBiodropsIntegrationAuthService>();
+
+            // Assert IsConfigured is false
+            Assert.False(authService.IsConfigured);
+
+            // Act: Attempt to authenticate with any key or legacy key
+            var result1 = authService.Authenticate("any_attempted_key", "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+            var result2 = authService.Authenticate(CompromisedLegacyKeyPlaintext, "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+
+            // Assert: Must fail safely with no fallback
+            Assert.False(result1.IsAuthorized);
+            Assert.Contains("not configured", result1.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+
+            Assert.False(result2.IsAuthorized);
+            Assert.True(result2.IsRevoked);
+        }
+
+        [Fact]
+        public void Authentication_CompromisedLegacyKey_IsPermanentlyRevokedAndRejected()
+        {
+            // Arrange: Even if someone accidentally provides the old exposed key in configuration
+            var legacyConfig = new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", CompromisedLegacyKeyPlaintext }
+            };
+            var (_, _, _, sp) = CreateTestEnvironment(Guid.NewGuid(), Guid.NewGuid(), legacyConfig);
+            var authService = sp.GetRequiredService<IBiodropsIntegrationAuthService>();
+
+            // Act
+            var result = authService.Authenticate(CompromisedLegacyKeyPlaintext, "10.0.0.1", "/api/v1/integrations/biodrops/tenants");
+
+            // Assert: Always blocked and marked revoked
+            Assert.False(result.IsAuthorized);
+            Assert.True(result.IsRevoked);
+            Assert.Contains("revoked", result.ErrorMessage, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Authentication_CredentialRotation_SupportsBothPrimaryAndSecondaryKeys()
+        {
+            // Arrange: Configure primary key and a secondary key for zero-downtime rotation
+            const string primaryKey = "primary_active_secret_key_11111";
+            const string secondaryKey = "secondary_rotation_secret_key_22222";
+
+            var rotationConfig = new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", primaryKey },
+                { "Integration:Biodrops:SecondaryApiKey", secondaryKey }
+            };
+            var (_, _, _, sp) = CreateTestEnvironment(Guid.NewGuid(), Guid.NewGuid(), rotationConfig);
+            var authService = sp.GetRequiredService<IBiodropsIntegrationAuthService>();
+
+            // Act 1: Primary key authenticates
+            var resultPrimary = authService.Authenticate(primaryKey, "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+            Assert.True(resultPrimary.IsAuthorized);
+            Assert.Equal("BiodropsProductionApp", resultPrimary.ClientName);
+
+            // Act 2: Secondary key authenticates seamlessly
+            var resultSecondary = authService.Authenticate(secondaryKey, "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+            Assert.True(resultSecondary.IsAuthorized);
+            Assert.Equal("BiodropsRotationApp", resultSecondary.ClientName);
+
+            // Act 3: Revoke primary key post-rotation
+            authService.RevokeApiKey(primaryKey, "Completed key rotation");
+            var resultPrimaryAfterRevoke = authService.Authenticate(primaryKey, "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+            var resultSecondaryAfterRevoke = authService.Authenticate(secondaryKey, "127.0.0.1", "/api/v1/integrations/biodrops/tenants");
+
+            Assert.False(resultPrimaryAfterRevoke.IsAuthorized);
+            Assert.True(resultPrimaryAfterRevoke.IsRevoked);
+            Assert.True(resultSecondaryAfterRevoke.IsAuthorized);
+        }
+
+        [Fact]
+        public void Authentication_NoCredentialsInLogs()
+        {
+            // Arrange: Verify logs never contain plaintext keys
+            const string secretKey = "super_private_secret_key_never_log_me_33333";
+            var mockLogger = new Mock<ILogger<BiodropsIntegrationAuthService>>();
+
+            var configDict = new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", secretKey }
+            };
+            var configuration = new ConfigurationBuilder().AddInMemoryCollection(configDict).Build();
+            var authService = new BiodropsIntegrationAuthService(configuration, mockLogger.Object);
+
+            // Act: Perform successful, invalid, missing, and revoked calls
+            authService.Authenticate(secretKey, "192.168.1.10", "/api/v1/integrations/biodrops/tenants");
+            authService.Authenticate("invalid_attempt_key_44444", "192.168.1.10", "/api/v1/integrations/biodrops/tenants");
+            authService.Authenticate(null, "192.168.1.10", "/api/v1/integrations/biodrops/tenants");
+
+            // Assert: Verify mockLogger was called, but none of the logged formatted strings contain the secretKey or invalid key
+            foreach (var invocation in mockLogger.Invocations.Where(i => i.Method.Name == "Log"))
+            {
+                var loggedMessage = invocation.Arguments[2]?.ToString() ?? string.Empty;
+                Assert.DoesNotContain(secretKey, loggedMessage);
+                Assert.DoesNotContain("invalid_attempt_key_44444", loggedMessage);
+            }
+        }
+
+        [Fact]
+        public void StartupConfigurationValidation_Production_ValidatesCorrectly()
+        {
+            // 1. Missing key in production -> Fails
+            var emptyConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+            var missingResult = BiodropsConfigurationValidator.Validate(emptyConfig, isProduction: true);
+            Assert.False(missingResult.IsValid);
+            Assert.Contains("missing required integration API key", missingResult.ErrorMessage);
+
+            // 2. Revoked legacy key in production -> Fails
+            var legacyConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", CompromisedLegacyKeyPlaintext }
+            }).Build();
+            var legacyResult = BiodropsConfigurationValidator.Validate(legacyConfig, isProduction: true);
+            Assert.False(legacyResult.IsValid);
+            Assert.Contains("revoked credential fingerprint", legacyResult.ErrorMessage);
+
+            // 3. Short key in production -> Fails
+            var shortConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", "short_key_123" }
+            }).Build();
+            var shortResult = BiodropsConfigurationValidator.Validate(shortConfig, isProduction: true);
+            Assert.False(shortResult.IsValid);
+            Assert.Contains("too short", shortResult.ErrorMessage);
+
+            // 4. Valid strong key in production -> Passes
+            var validConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", "strong_production_key_random_64_bytes_entropy_abc123" }
+            }).Build();
+            var validResult = BiodropsConfigurationValidator.Validate(validConfig, isProduction: true);
+            Assert.True(validResult.IsValid);
+            Assert.True(validResult.IsConfigured);
+        }
+
+        [Fact]
+        public void StartupConfigurationValidation_Development_ValidatesCorrectly()
+        {
+            // Missing key in development -> Valid but with warnings (fails safe at runtime)
+            var emptyConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+            var devResult = BiodropsConfigurationValidator.Validate(emptyConfig, isProduction: false);
+            Assert.True(devResult.IsValid);
+            Assert.False(devResult.IsConfigured);
+            Assert.NotEmpty(devResult.Warnings);
+
+            // Valid key in development -> Valid
+            var validConfig = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", "dev_local_test_key_12345" }
+            }).Build();
+            var validDevResult = BiodropsConfigurationValidator.Validate(validConfig, isProduction: false);
+            Assert.True(validDevResult.IsValid);
+            Assert.True(validDevResult.IsConfigured);
+        }
+
+        [Fact]
+        public async Task AuthenticationFilter_AllSevenSecurityAuditScenarios_VerifyExpectedStatusCodesAndSafeBehavior()
+        {
+            // Scenario configuration
+            const string primaryKey = "audit_prod_primary_key_abc123456789";
+            const string secondaryKey = "audit_prod_secondary_key_xyz987654321";
+            const string randomRevokedKey = "revoked_random_token_55555";
+
+            // Hash the random revoked key to test SHA-256 fingerprint matching
+            var revokedFingerprintHex = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(randomRevokedKey))).ToLowerInvariant();
+
+            var configDict = new Dictionary<string, string?>
+            {
+                { "Integration:Biodrops:ApiKey", primaryKey },
+                { "Integration:Biodrops:SecondaryApiKey", secondaryKey },
+                { "Integration:Biodrops:RevokedKeys", revokedFingerprintHex }
+            };
+
+            var (_, _, _, sp) = CreateTestEnvironment(Guid.NewGuid(), Guid.NewGuid(), configDict);
+            var authService = sp.GetRequiredService<IBiodropsIntegrationAuthService>();
+            var filter = new BiodropsApiKeyAuthFilter(authService);
+
+            async Task<(int StatusCode, bool NextExecuted)> ExecuteRequestAsync(string? headerName, string? headerVal)
+            {
+                var httpContext = new DefaultHttpContext();
+                if (headerName != null && headerVal != null)
+                {
+                    httpContext.Request.Headers[headerName] = headerVal;
+                }
+
+                var actionContext = new ActionContext(httpContext, new Microsoft.AspNetCore.Routing.RouteData(), new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor());
+                var actionExecutingContext = new ActionExecutingContext(actionContext, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: null!);
+
+                bool nextExecuted = false;
+                await filter.OnActionExecutionAsync(actionExecutingContext, () =>
+                {
+                    nextExecuted = true;
+                    return Task.FromResult<ActionExecutedContext>(null!);
+                });
+
+                if (nextExecuted)
+                {
+                    return ((int)HttpStatusCode.OK, true);
+                }
+
+                var objResult = Assert.IsType<ObjectResult>(actionExecutingContext.Result);
+                return (objResult.StatusCode ?? 0, false);
+            }
+
+            // 1. Correct primary key -> 200
+            var (status1, next1) = await ExecuteRequestAsync("X-API-Key", primaryKey);
+            Assert.True(next1);
+            Assert.Equal((int)HttpStatusCode.OK, status1);
+
+            // 2. Correct secondary key -> 200
+            var (status2, next2) = await ExecuteRequestAsync("Authorization", $"Bearer {secondaryKey}");
+            Assert.True(next2);
+            Assert.Equal((int)HttpStatusCode.OK, status2);
+
+            // 3. Previous exposed key -> 403
+            var (status3, next3) = await ExecuteRequestAsync("X-API-Key", CompromisedLegacyKeyPlaintext);
+            Assert.False(next3);
+            Assert.Equal((int)HttpStatusCode.Forbidden, status3);
+
+            // 4. Invalid key -> 401
+            var (status4, next4) = await ExecuteRequestAsync("X-API-Key", "totally_invalid_token_9999");
+            Assert.False(next4);
+            Assert.Equal((int)HttpStatusCode.Unauthorized, status4);
+
+            // 5. Missing key -> 401
+            var (status5, next5) = await ExecuteRequestAsync(null, null);
+            Assert.False(next5);
+            Assert.Equal((int)HttpStatusCode.Unauthorized, status5);
+
+            // 6. Revoked key -> 403
+            var (status6, next6) = await ExecuteRequestAsync("X-API-Key", randomRevokedKey);
+            Assert.False(next6);
+            Assert.Equal((int)HttpStatusCode.Forbidden, status6);
+
+            // 7. Missing production configuration -> application fails safely (401 Unauthorized / unconfigured)
+            var (_, _, _, unconfiguredSp) = CreateTestEnvironment(Guid.NewGuid(), Guid.NewGuid(), new Dictionary<string, string?>());
+            var unconfiguredFilter = new BiodropsApiKeyAuthFilter(unconfiguredSp.GetRequiredService<IBiodropsIntegrationAuthService>());
+
+            var unconfiguredContext = new DefaultHttpContext();
+            unconfiguredContext.Request.Headers["X-API-Key"] = primaryKey;
+            var unconfiguredActionContext = new ActionContext(unconfiguredContext, new Microsoft.AspNetCore.Routing.RouteData(), new Microsoft.AspNetCore.Mvc.Abstractions.ActionDescriptor());
+            var unconfiguredExecContext = new ActionExecutingContext(unconfiguredActionContext, new List<IFilterMetadata>(), new Dictionary<string, object?>(), controller: null!);
+
+            bool unconfiguredNext = false;
+            await unconfiguredFilter.OnActionExecutionAsync(unconfiguredExecContext, () =>
+            {
+                unconfiguredNext = true;
+                return Task.FromResult<ActionExecutedContext>(null!);
+            });
+
+            Assert.False(unconfiguredNext);
+            var unconfiguredResult = Assert.IsType<ObjectResult>(unconfiguredExecContext.Result);
+            Assert.Equal((int)HttpStatusCode.Unauthorized, unconfiguredResult.StatusCode);
         }
 
         #endregion
