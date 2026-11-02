@@ -50,6 +50,9 @@ namespace Aquora.Application
 
             services.AddScoped<IReportService, ReportService>();
             services.AddScoped<IUserProfileService, UserProfileService>();
+            // Dedicated Biodrops Production External Integration Services
+            services.AddSingleton<IBiodropsIntegrationAuthService, BiodropsIntegrationAuthService>();
+            services.AddScoped<IBiodropsIntegrationService, BiodropsIntegrationService>();
 
 
             return services;

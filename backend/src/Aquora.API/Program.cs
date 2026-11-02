@@ -125,6 +125,18 @@ builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler
                     QueueLimit = 0,
                     Window = TimeSpan.FromMinutes(1)
                 }));
+
+        // Dedicated Rate Limiting Policy for Biodrops External Integration
+        options.AddPolicy("BiodropsIntegrationPolicy", httpContext =>
+            System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: httpContext.Request.Headers["X-API-Key"].ToString() is { Length: > 0 } k ? k : (httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown"),
+                factory: partition => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+                {
+                    AutoReplenishment = true,
+                    PermitLimit = 120,
+                    QueueLimit = 0,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
     });
 
     // Configure Forwarded Headers for Reverse Proxy (Nginx / Cloudflare / Docker)
@@ -182,6 +194,25 @@ builder.Services.AddSwaggerGen(c =>
     c.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         { securityScheme, Array.Empty<string>() }
+    });
+
+    var apiKeyScheme = new OpenApiSecurityScheme
+    {
+        Name = "X-API-Key",
+        Description = "Dedicated API Key for Biodrops Production External Integration (Header: X-API-Key)",
+        In = ParameterLocation.Header,
+        Type = SecuritySchemeType.ApiKey,
+        Scheme = "ApiKey",
+        Reference = new OpenApiReference
+        {
+            Id = "BiodropsApiKey",
+            Type = ReferenceType.SecurityScheme
+        }
+    };
+    c.AddSecurityDefinition(apiKeyScheme.Reference.Id, apiKeyScheme);
+    c.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        { apiKeyScheme, Array.Empty<string>() }
     });
 });
 
