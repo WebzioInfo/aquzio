@@ -21,5 +21,6 @@ namespace Aquora.Application.DTOs.Products
         public string? ImageUrl { get; set; }
         public DateTime CreatedAt { get; set; }
         public DateTime? UpdatedAt { get; set; }
+        public string? UpdatedBy { get; set; }
     }
 }

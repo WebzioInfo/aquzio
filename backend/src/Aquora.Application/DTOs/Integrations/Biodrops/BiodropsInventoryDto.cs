@@ -53,6 +53,18 @@ namespace Aquora.Application.DTOs.Integrations.Biodrops
 
         [JsonPropertyName("unit")]
         public string Unit { get; set; } = "Jar";
+
+        [JsonPropertyName("lastUpdatedUtc")]
+        public DateTime? LastUpdatedUtc { get; set; }
+
+        [JsonPropertyName("lastUpdatedBy")]
+        public string? LastUpdatedBy { get; set; }
+
+        [JsonPropertyName("lastSource")]
+        public string? LastSource { get; set; }
+
+        [JsonPropertyName("lastMovementNotes")]
+        public string? LastMovementNotes { get; set; }
     }
 
     /// <summary>
@@ -86,6 +98,18 @@ namespace Aquora.Application.DTOs.Integrations.Biodrops
 
         [JsonPropertyName("reorderLevel")]
         public decimal? ReorderLevel { get; set; }
+
+        [JsonPropertyName("lastUpdatedUtc")]
+        public DateTime? LastUpdatedUtc { get; set; }
+
+        [JsonPropertyName("lastUpdatedBy")]
+        public string? LastUpdatedBy { get; set; }
+
+        [JsonPropertyName("lastSource")]
+        public string? LastSource { get; set; }
+
+        [JsonPropertyName("lastMovementNotes")]
+        public string? LastMovementNotes { get; set; }
     }
 }
 

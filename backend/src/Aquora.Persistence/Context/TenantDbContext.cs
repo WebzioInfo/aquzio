@@ -1093,8 +1093,11 @@ namespace Aquora.Persistence.Context
                                 _dateTimeProvider.UtcNow;
                         }
 
-                        auditableEntity.CreatedBy =
-                            currentUserId;
+                        if (string.IsNullOrWhiteSpace(auditableEntity.CreatedBy))
+                        {
+                            auditableEntity.CreatedBy =
+                                currentUserId;
+                        }
 
                         auditableEntity.CreatedByIP =
                             _currentUserContext.IpAddress

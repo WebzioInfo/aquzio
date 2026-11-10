@@ -1121,5 +1121,358 @@ namespace Aquora.Tests
         }
 
         #endregion
+
+        #region 8. Stock Adjustment Integration Tests
+
+        [Fact]
+        public async Task AdjustTenantStock_AddAction_AuthoritativelyIncreasesStockAndInsertsMovement()
+        {
+            // Arrange
+            var tenantId = Guid.NewGuid();
+            var rawMaterialId = Guid.NewGuid();
+            var (platformDb, tenantDb, _, sp) = CreateTestEnvironment(tenantId, Guid.NewGuid());
+
+            platformDb.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Faiha Water Solutions",
+                Code = "ACCOUNTANT_COMPANY",
+                Subdomain = "faiha",
+                SchemaName = "tenant_alpha",
+                IsActive = true,
+                IsDeleted = false,
+                IsBiodropsProduction = true,
+                CreatedBy = "System",
+                CreatedAt = DateTime.UtcNow
+            });
+            await platformDb.SaveChangesAsync();
+
+            tenantDb.RawMaterials.Add(new RawMaterial
+            {
+                Id = rawMaterialId,
+                TenantId = tenantId,
+                CompanyId = tenantId,
+                Name = "1000 ML BOTTLE",
+                Code = "1000_ML",
+                Category = "PREFORM",
+                Unit = "LITER",
+                BaseUnit = "LITER",
+                CurrentStock = 987m,
+                IsActive = true,
+                IsDeleted = false,
+                CreatedBy = "Admin"
+            });
+            await tenantDb.SaveChangesAsync();
+
+            var service = sp.GetRequiredService<IBiodropsIntegrationService>();
+
+            var request = new BiodropsStockAdjustmentRequestDto
+            {
+                TenantId = tenantId,
+                Sku = "1000_ML",
+                ItemType = "RAW_MATERIAL",
+                Action = "ADD",
+                Quantity = 50m,
+                CalculatedNewQuantity = 9999m, // Untrusted client calculation must be ignored
+                Unit = "LITER",
+                MovementType = "EDROPS_ADJUSTMENT",
+                Description = "Changed in eDrops: Supplier Inward (PO-8891)",
+                Reason = "Supplier Inward",
+                Notes = "PO-8891",
+                Operator = "eDrops System (Staff: Murshid)",
+                Reference = "EDROPS-ADJ-TEST-001"
+            };
+
+            // Act
+            var result = await service.AdjustTenantStockAsync(tenantId, request, "IDEM-TEST-001");
+
+            // Assert
+            Assert.NotNull(result);
+            Assert.Equal(tenantId, result.TenantId);
+            Assert.Equal("1000_ML", result.Sku);
+            Assert.Equal("ADD", result.Action);
+            Assert.Equal(987m, result.PreviousQuantity);
+            Assert.Equal(50m, result.AdjustmentQuantity);
+            Assert.Equal(1037m, result.NewQuantity); // Authoritatively calculated 987 + 50 = 1037
+            Assert.Equal("LITER", result.Unit);
+            Assert.Equal("EDROPS", result.Source);
+            Assert.NotEqual(Guid.Empty, result.TransactionId);
+            Assert.NotEqual(Guid.Empty, result.MovementId);
+
+            // Verify persistence in TenantDb
+            var updatedMaterial = await tenantDb.RawMaterials.AsNoTracking().FirstOrDefaultAsync(rm => rm.Id == rawMaterialId);
+            Assert.NotNull(updatedMaterial);
+            Assert.Equal(1037m, updatedMaterial.CurrentStock);
+
+            // Verify movement history record in TenantDb
+            var movement = await tenantDb.InventoryMovements.AsNoTracking().FirstOrDefaultAsync(m => m.Id == result.MovementId);
+            Assert.NotNull(movement);
+            Assert.Equal(rawMaterialId, movement.RawMaterialId);
+            Assert.Equal(50m, movement.Quantity);
+            Assert.Equal(1037m, movement.BalanceAfter);
+            Assert.Equal("EDROPS_ADJUSTMENT", movement.ReferenceType);
+            Assert.Equal("Changed in eDrops: Supplier Inward (PO-8891)", movement.Notes);
+            Assert.Equal("eDrops System (Staff: Murshid)", movement.CreatedBy);
+        }
+
+        [Fact]
+        public async Task AdjustTenantStock_DeductAction_DecreasesStockCorrectly()
+        {
+            // Arrange
+            var tenantId = Guid.NewGuid();
+            var rawMaterialId = Guid.NewGuid();
+            var (platformDb, tenantDb, _, sp) = CreateTestEnvironment(tenantId, Guid.NewGuid());
+
+            platformDb.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Faiha Water Solutions",
+                Code = "ACCOUNTANT_COMPANY",
+                Subdomain = "faiha",
+                SchemaName = "tenant_alpha",
+                IsActive = true,
+                IsDeleted = false,
+                IsBiodropsProduction = true,
+                CreatedBy = "System",
+                CreatedAt = DateTime.UtcNow
+            });
+            await platformDb.SaveChangesAsync();
+
+            tenantDb.RawMaterials.Add(new RawMaterial
+            {
+                Id = rawMaterialId,
+                TenantId = tenantId,
+                CompanyId = tenantId,
+                Name = "bottle",
+                Code = "BOTTLE",
+                Category = "BOTTLE",
+                Unit = "KG",
+                BaseUnit = "KG",
+                CurrentStock = 100m,
+                IsActive = true,
+                IsDeleted = false,
+                CreatedBy = "Admin"
+            });
+            await tenantDb.SaveChangesAsync();
+
+            var service = sp.GetRequiredService<IBiodropsIntegrationService>();
+
+            var request = new BiodropsStockAdjustmentRequestDto
+            {
+                TenantId = tenantId,
+                Sku = "BOTTLE",
+                ItemType = "RAW_MATERIAL",
+                Action = "DEDUCT",
+                Quantity = 10m,
+                Unit = "KG",
+                MovementType = "EDROPS_ADJUSTMENT",
+                Description = "Changed in eDrops: Damage / Wastage",
+                Operator = "eDrops System (Staff: Murshid)"
+            };
+
+            // Act
+            var result = await service.AdjustTenantStockAsync(tenantId, request);
+
+            // Assert
+            Assert.Equal(100m, result.PreviousQuantity);
+            Assert.Equal(-10m, result.AdjustmentQuantity);
+            Assert.Equal(90m, result.NewQuantity);
+
+            var updatedMaterial = await tenantDb.RawMaterials.AsNoTracking().FirstOrDefaultAsync(rm => rm.Id == rawMaterialId);
+            Assert.NotNull(updatedMaterial);
+            Assert.Equal(90m, updatedMaterial.CurrentStock);
+        }
+
+        [Fact]
+        public async Task AdjustTenantStock_DeductExceedingBalance_ThrowsInvalidOperationException()
+        {
+            // Arrange
+            var tenantId = Guid.NewGuid();
+            var (platformDb, tenantDb, _, sp) = CreateTestEnvironment(tenantId, Guid.NewGuid());
+
+            platformDb.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Faiha Water Solutions",
+                Code = "ACCOUNTANT_COMPANY",
+                Subdomain = "faiha",
+                SchemaName = "tenant_alpha",
+                IsActive = true,
+                IsDeleted = false,
+                IsBiodropsProduction = true,
+                CreatedBy = "System",
+                CreatedAt = DateTime.UtcNow
+            });
+            await platformDb.SaveChangesAsync();
+
+            tenantDb.RawMaterials.Add(new RawMaterial
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                CompanyId = tenantId,
+                Name = "bottle",
+                Code = "BOTTLE",
+                Category = "BOTTLE",
+                Unit = "KG",
+                BaseUnit = "KG",
+                CurrentStock = 10m,
+                IsActive = true,
+                IsDeleted = false,
+                CreatedBy = "Admin"
+            });
+            await tenantDb.SaveChangesAsync();
+
+            var service = sp.GetRequiredService<IBiodropsIntegrationService>();
+
+            var request = new BiodropsStockAdjustmentRequestDto
+            {
+                TenantId = tenantId,
+                Sku = "BOTTLE",
+                ItemType = "RAW_MATERIAL",
+                Action = "DEDUCT",
+                Quantity = 50m, // 50 > 10
+                Unit = "KG"
+            };
+
+            // Act & Assert
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                service.AdjustTenantStockAsync(tenantId, request));
+        }
+
+        [Fact]
+        public async Task AdjustTenantStock_TenantMismatch_ThrowsArgumentException()
+        {
+            // Arrange
+            var urlTenantId = Guid.NewGuid();
+            var bodyTenantId = Guid.NewGuid();
+            var (_, _, _, sp) = CreateTestEnvironment(urlTenantId, bodyTenantId);
+            var service = sp.GetRequiredService<IBiodropsIntegrationService>();
+
+            var request = new BiodropsStockAdjustmentRequestDto
+            {
+                TenantId = bodyTenantId,
+                Sku = "BOTTLE",
+                Action = "ADD",
+                Quantity = 10m,
+                Unit = "KG"
+            };
+
+            // Act & Assert
+            await Assert.ThrowsAsync<ArgumentException>(() =>
+                service.AdjustTenantStockAsync(urlTenantId, request));
+        }
+
+        [Fact]
+        public async Task AdjustTenantStock_DisabledTenantToggle_ThrowsUnauthorizedAccessException()
+        {
+            // Arrange
+            var disabledTenantId = Guid.NewGuid();
+            var (platformDb, _, _, sp) = CreateTestEnvironment(disabledTenantId, Guid.NewGuid());
+
+            platformDb.Tenants.Add(new Tenant
+            {
+                Id = disabledTenantId,
+                Name = "Disabled Bottler",
+                Code = "DISABLED",
+                Subdomain = "disabled",
+                SchemaName = "tenant_alpha",
+                IsActive = true,
+                IsDeleted = false,
+                IsBiodropsProduction = false, // Toggle is disabled
+                CreatedBy = "System",
+                CreatedAt = DateTime.UtcNow
+            });
+            await platformDb.SaveChangesAsync();
+
+            var service = sp.GetRequiredService<IBiodropsIntegrationService>();
+
+            var request = new BiodropsStockAdjustmentRequestDto
+            {
+                TenantId = disabledTenantId,
+                Sku = "BOTTLE",
+                Action = "ADD",
+                Quantity = 10m,
+                Unit = "KG"
+            };
+
+            // Act & Assert
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+                service.AdjustTenantStockAsync(disabledTenantId, request));
+        }
+
+        [Fact]
+        public async Task AdjustTenantStock_IdempotentRetry_ReturnsCommittedResponseWithoutDoubleAdjustment()
+        {
+            // Arrange
+            var tenantId = Guid.NewGuid();
+            var rawMaterialId = Guid.NewGuid();
+            var (platformDb, tenantDb, _, sp) = CreateTestEnvironment(tenantId, Guid.NewGuid());
+
+            platformDb.Tenants.Add(new Tenant
+            {
+                Id = tenantId,
+                Name = "Faiha Water Solutions",
+                Code = "ACCOUNTANT_COMPANY",
+                Subdomain = "faiha",
+                SchemaName = "tenant_alpha",
+                IsActive = true,
+                IsDeleted = false,
+                IsBiodropsProduction = true,
+                CreatedBy = "System",
+                CreatedAt = DateTime.UtcNow
+            });
+            await platformDb.SaveChangesAsync();
+
+            tenantDb.RawMaterials.Add(new RawMaterial
+            {
+                Id = rawMaterialId,
+                TenantId = tenantId,
+                CompanyId = tenantId,
+                Name = "1000 ML BOTTLE",
+                Code = "1000_ML",
+                Category = "PREFORM",
+                Unit = "LITER",
+                BaseUnit = "LITER",
+                CurrentStock = 100m,
+                IsActive = true,
+                IsDeleted = false,
+                CreatedBy = "Admin"
+            });
+            await tenantDb.SaveChangesAsync();
+
+            var service = sp.GetRequiredService<IBiodropsIntegrationService>();
+
+            var request = new BiodropsStockAdjustmentRequestDto
+            {
+                TenantId = tenantId,
+                Sku = "1000_ML",
+                ItemType = "RAW_MATERIAL",
+                Action = "ADD",
+                Quantity = 25m,
+                Unit = "LITER",
+                Reference = "IDEM-RETRY-001"
+            };
+
+            // First call
+            var firstResult = await service.AdjustTenantStockAsync(tenantId, request, "KEY-IDEM-001");
+            Assert.Equal(125m, firstResult.NewQuantity);
+
+            var materialAfterFirst = await tenantDb.RawMaterials.AsNoTracking().FirstOrDefaultAsync(rm => rm.Id == rawMaterialId);
+            Assert.NotNull(materialAfterFirst);
+            Assert.Equal(125m, materialAfterFirst.CurrentStock);
+
+            // Duplicate call (network retry) with same idempotency key and payload
+            var secondResult = await service.AdjustTenantStockAsync(tenantId, request, "KEY-IDEM-001");
+
+            // Assert: Returned the same transaction and didn't increment stock again!
+            Assert.Equal(firstResult.TransactionId, secondResult.TransactionId);
+            Assert.Equal(125m, secondResult.NewQuantity);
+
+            var materialAfterSecond = await tenantDb.RawMaterials.AsNoTracking().FirstOrDefaultAsync(rm => rm.Id == rawMaterialId);
+            Assert.NotNull(materialAfterSecond);
+            Assert.Equal(125m, materialAfterSecond.CurrentStock); // Still 125, never 150!
+        }
+
+        #endregion
     }
 }

@@ -40,7 +40,12 @@ const MOVEMENT_TYPE_MAP: Record<string, { label: string; cls: string; icon: stri
 
   stockadded: { label: 'Stock Added', cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', icon: '📥' },
   manual: { label: 'Manually Updated', cls: 'bg-violet-50 border-violet-200 text-violet-700', icon: '👤' },
-  productioncompleted: { label: 'Production Completed', cls: 'bg-green-50 border-green-200 text-green-700', icon: '🏭' }
+  productioncompleted: { label: 'Production Completed', cls: 'bg-green-50 border-green-200 text-green-700', icon: '🏭' },
+
+  // eDrops integration movement types
+  edrops_adjustment: { label: 'Changed in eDrops', cls: 'bg-sky-50 border-sky-200 text-sky-700', icon: '💧' },
+  edropsadjustment: { label: 'Changed in eDrops', cls: 'bg-sky-50 border-sky-200 text-sky-700', icon: '💧' },
+  edrops: { label: 'Changed in eDrops', cls: 'bg-sky-50 border-sky-200 text-sky-700', icon: '💧' }
 }
 
 const getMovementBadge = (type: string) => {
@@ -760,7 +765,19 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ canWrite, showToas
                                 )}
                               </td>
                               <td className="py-2 px-4 text-center"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wider ${row.isActive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{row.isActive ? 'Active' : 'Inactive'}</span></td>
-                              <td className="py-2 px-4 text-slate-500 text-[12px]">{fmtDate(row.updatedAt || row.createdAt)}</td>
+                              <td className="py-2 px-4 text-slate-500 text-[12px]">
+                                <div className="flex flex-col gap-0.5">
+                                  <span>{fmtDate(row.updatedAt || row.createdAt)}</span>
+                                  {row.updatedBy?.toLowerCase().includes('edrops') ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-700 w-fit">
+                                      <span>💧</span>
+                                      <span>Changed in eDrops</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 font-medium">by {row.updatedBy || 'Plant'}</span>
+                                  )}
+                                </div>
+                              </td>
                               {canWrite && <td className="py-2 px-4 text-center" onClick={e => e.stopPropagation()}><div className="flex items-center justify-center gap-1">
                                 <button onClick={() => openEditProduct(row)} title="Edit" className="h-[26px] w-[26px] flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"><Edit2 className="w-3.5 h-3.5" /></button>
                                 <button onClick={() => triggerDeleteProduct(row.id, row.name)} title="Delete" className="h-[26px] w-[26px] flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -814,7 +831,19 @@ export const InventoryPage: React.FC<InventoryPageProps> = ({ canWrite, showToas
                               <td className="py-2 px-4 text-right font-black tabular-nums"><span className={mat.currentStock <= 0 ? 'text-red-600' : mat.currentStock < 50 ? 'text-amber-600' : 'text-slate-900'}>{mat.currentStock ?? 0}</span></td>
                               <td className="py-2 px-4 text-slate-500 text-[12px]">{mat.unit}</td>
                               <td className="py-2 px-4 text-center"><span className={`text-[9px] font-black px-2 py-0.5 rounded-full border uppercase tracking-wider ${mat.isActive ? 'bg-green-50 border-green-200 text-green-700' : 'bg-red-50 border-red-200 text-red-700'}`}>{mat.isActive ? 'Active' : 'Inactive'}</span></td>
-                              <td className="py-2 px-4 text-slate-500 text-[12px]">{fmtDate(mat.updatedAt || mat.createdAt)}</td>
+                              <td className="py-2 px-4 text-slate-500 text-[12px]">
+                                <div className="flex flex-col gap-0.5">
+                                  <span>{fmtDate(mat.updatedAt || mat.createdAt)}</span>
+                                  {mat.updatedBy?.toLowerCase().includes('edrops') ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-sky-50 border border-sky-200 text-sky-700 w-fit">
+                                      <span>💧</span>
+                                      <span>Changed in eDrops</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-slate-400 font-medium">by {mat.updatedBy || 'Plant'}</span>
+                                  )}
+                                </div>
+                              </td>
                               {canWrite && <td className="py-2 px-4 text-center" onClick={e => e.stopPropagation()}><div className="flex items-center justify-center gap-1">
                                 <button onClick={() => openEditRawMaterial(mat)} title="Edit" className="h-[26px] w-[26px] flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-all"><Edit2 className="w-3.5 h-3.5" /></button>
                                 <button onClick={() => triggerDeleteRawMaterial(mat.id, mat.name)} title="Delete" className="h-[26px] w-[26px] flex items-center justify-center text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-all"><Trash2 className="w-3.5 h-3.5" /></button>

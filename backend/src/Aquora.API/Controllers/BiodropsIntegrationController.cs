@@ -140,5 +140,118 @@ namespace Aquora.API.Controllers
 
             return Success(summary, "Tenant Biodrops Production stock summary retrieved successfully.");
         }
+
+        /// <summary>
+        /// Retrieves Biodrops Production sales transactions for the specified tenant.
+        /// </summary>
+        /// <remarks>
+        /// Returns 20L Jar finished product sales orders and dispatches.
+        /// Strictly validates tenant existence and verifies that Biodrops Production is enabled.
+        /// Returns 404 Not Found if the tenant does not exist or has Biodrops Production disabled.
+        /// </remarks>
+        /// <param name="tenantId">The unique ID of the tenant.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        [HttpGet("tenants/{tenantId:guid}/sales")]
+        [ProducesResponseType(typeof(ApiResponse<List<BiodropsSaleDto>>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<ApiResponse<List<BiodropsSaleDto>>>> GetTenantSales(
+            Guid tenantId,
+            CancellationToken cancellationToken)
+        {
+            if (tenantId == Guid.Empty)
+            {
+                return Failure<List<BiodropsSaleDto>>("A valid non-empty tenant ID must be provided.", "A valid non-empty tenant ID must be provided.", HttpStatusCode.BadRequest);
+            }
+
+            var sales = await _biodropsService.GetTenantSalesAsync(tenantId, cancellationToken);
+            if (sales == null)
+            {
+                return Failure<List<BiodropsSaleDto>>(
+                    "Tenant not found or Biodrops Production is not enabled for this tenant.",
+                    "Tenant not found or Biodrops Production is not enabled for this tenant.",
+                    HttpStatusCode.NotFound);
+            }
+
+            return Success(sales, "Tenant Biodrops Production sales retrieved successfully.");
+        }
+
+        /// <summary>
+        /// Adjusts inventory stock for the specified tenant, recording authoritative balance changes
+        /// and inserting an immutable stock movement record.
+        /// </summary>
+        /// <remarks>
+        /// Authenticates via server-to-server X-API-Key header.
+        /// Validates tenant existence, active status, and Biodrops toggle.
+        /// Authoritatively calculates the new balance in PostgreSQL and creates an immutable movement history entry.
+        /// Supports persistent idempotency via Idempotency-Key header.
+        /// </remarks>
+        /// <param name="tenantId">The unique ID of the tenant.</param>
+        /// <param name="request">Stock adjustment parameters.</param>
+        /// <param name="idempotencyKey">Optional unique idempotency token for network retry protection.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        [HttpPost("tenants/{tenantId:guid}/stock/adjust")]
+        [ProducesResponseType(typeof(ApiResponse<BiodropsStockAdjustmentResultDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status401Unauthorized)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status404NotFound)]
+        [ProducesResponseType(typeof(ApiResponse<object>), StatusCodes.Status409Conflict)]
+        public async Task<ActionResult<ApiResponse<BiodropsStockAdjustmentResultDto>>> AdjustStock(
+            Guid tenantId,
+            [FromBody] BiodropsStockAdjustmentRequestDto request,
+            [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey,
+            CancellationToken cancellationToken)
+        {
+            if (tenantId == Guid.Empty)
+            {
+                return Failure<BiodropsStockAdjustmentResultDto>("A valid non-empty tenant ID must be provided in URL.", "INVALID_TENANT_ID", HttpStatusCode.BadRequest);
+            }
+
+            if (request == null)
+            {
+                return Failure<BiodropsStockAdjustmentResultDto>("Adjustment request payload is required.", "EMPTY_REQUEST_PAYLOAD", HttpStatusCode.BadRequest);
+            }
+
+            if (tenantId != request.TenantId)
+            {
+                return Failure<BiodropsStockAdjustmentResultDto>(
+                    $"Tenant ID mismatch: URL tenant ID '{tenantId}' does not match body tenant ID '{request.TenantId}'.",
+                    "TENANT_ID_MISMATCH",
+                    HttpStatusCode.BadRequest);
+            }
+
+            try
+            {
+                var result = await _biodropsService.AdjustTenantStockAsync(tenantId, request, idempotencyKey, cancellationToken);
+                return Success(result, "Stock adjustment completed successfully.");
+            }
+            catch (ArgumentException ex)
+            {
+                return Failure<BiodropsStockAdjustmentResultDto>(ex.Message, "VALIDATION_FAILED", HttpStatusCode.BadRequest);
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return Failure<BiodropsStockAdjustmentResultDto>(ex.Message, "ITEM_OR_TENANT_NOT_FOUND", HttpStatusCode.NotFound);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Failure<BiodropsStockAdjustmentResultDto>(ex.Message, "TENANT_INTEGRATION_DISABLED", HttpStatusCode.Forbidden);
+            }
+            catch (InvalidOperationException ex)
+            {
+                if (ex.Message.Contains("Idempotency key", StringComparison.OrdinalIgnoreCase))
+                {
+                    return Failure<BiodropsStockAdjustmentResultDto>(ex.Message, "IDEMPOTENCY_CONFLICT", HttpStatusCode.Conflict);
+                }
+                return Failure<BiodropsStockAdjustmentResultDto>(ex.Message, "STOCK_RULE_VIOLATION", HttpStatusCode.BadRequest);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[BIODROPS INTEGRATION] Unexpected error while adjusting stock for tenant {TenantId}: {Message}", tenantId, ex.Message);
+                return Failure<BiodropsStockAdjustmentResultDto>("An unexpected error occurred while executing the stock adjustment.", "INTERNAL_SERVER_ERROR", HttpStatusCode.InternalServerError);
+            }
+        }
     }
 }

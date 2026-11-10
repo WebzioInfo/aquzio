@@ -20,7 +20,10 @@ namespace Aquora.API.Middleware
 
         public async Task InvokeAsync(HttpContext context, ITenantProvider tenantProvider, PlatformDbContext platformContext)
         {
-            if (HttpMethods.IsOptions(context.Request.Method))
+            if (HttpMethods.IsOptions(context.Request.Method) ||
+                context.Request.Path.StartsWithSegments("/api/v1/integrations") ||
+                context.Request.Path.StartsWithSegments("/health") ||
+                context.Request.Path.StartsWithSegments("/swagger"))
             {
                 await _next(context);
                 return;
@@ -55,8 +58,8 @@ namespace Aquora.API.Middleware
                 }
             }
 
-            // 2. Fallback to Custom Domain
-            if (resolvedTenantId == null)
+            // 2. Fallback to Custom Domain (skip for localhost/127.0.0.1)
+            if (resolvedTenantId == null && !host.Equals("localhost", StringComparison.OrdinalIgnoreCase) && !host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase))
             {
                 var tenant = await platformContext.Tenants
                     .Where(t => t.CustomDomain != null && t.CustomDomain.ToLower() == host.ToLower() && !t.IsDeleted)

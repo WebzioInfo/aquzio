@@ -81,7 +81,8 @@ namespace Aquora.API.Controllers
                         CurrentStock = rm.CurrentStock,
                         CostPerUnit = rm.CostPerUnit,
                         CreatedAt = rm.CreatedAt,
-                        UpdatedAt = rm.UpdatedAt
+                        UpdatedAt = rm.UpdatedAt,
+                        UpdatedBy = rm.UpdatedBy
                     })
                     .ToListAsync();
 

@@ -90,7 +90,8 @@ namespace Aquora.API.Controllers
                         BottleSize = p.BottleSize,
                         ImageUrl = p.ImageUrl,
                         CreatedAt = p.CreatedAt,
-                        UpdatedAt = p.UpdatedAt
+                        UpdatedAt = p.UpdatedAt,
+                        UpdatedBy = p.UpdatedBy
                     })
                     .ToListAsync();
 

@@ -29,6 +29,24 @@ namespace Aquora.Application.Interfaces.Services
         /// Quantities with different units are never added together.
         /// </summary>
         Task<BiodropsStockSummaryDto?> GetTenantStockSummaryAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Retrieves Biodrops Production sales transactions for a specific tenant.
+        /// Returns null if tenant is not found, inactive, or not enabled for Biodrops Production.
+        /// Only transactions for Biodrops products (20L jars) are returned.
+        /// </summary>
+        Task<List<BiodropsSaleDto>?> GetTenantSalesAsync(Guid tenantId, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Atomically adjusts raw material or finished product stock for the specified tenant,
+        /// creates an immutable movement history entry, and returns the committed balance.
+        /// Enforces persistent idempotency and authoritative server-side stock calculation.
+        /// </summary>
+        Task<BiodropsStockAdjustmentResultDto> AdjustTenantStockAsync(
+            Guid tenantId,
+            BiodropsStockAdjustmentRequestDto request,
+            string? idempotencyKey = null,
+            CancellationToken cancellationToken = default);
     }
 }
 
