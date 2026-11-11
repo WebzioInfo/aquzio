@@ -721,7 +721,11 @@ namespace Aquora.Application.Services
                         NewValues = JsonSerializer.Serialize(result),
                         Timestamp = DateTime.UtcNow,
                         Module = "BiodropsIntegration",
-                        Reason = $"Committed eDrops adjustment: {cleanAction} {request.Quantity} {resolvedUnit} on '{targetItemName}'"
+                        Reason = $"Committed eDrops adjustment: {cleanAction} {request.Quantity} {resolvedUnit} on '{targetItemName}'",
+                        UserId = !string.IsNullOrWhiteSpace(request.Operator) ? request.Operator.Trim() : "eDrops-System",
+                        UserEmail = "integration@edrops.in",
+                        IpAddress = "127.0.0.1",
+                        Device = "eDrops Integration Agent"
                     };
 
                     _platformContext.PlatformAuditLogs.Add(auditLog);
