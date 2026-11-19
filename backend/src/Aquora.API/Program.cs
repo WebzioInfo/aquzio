@@ -243,44 +243,21 @@ builder.Services.AddCors(options =>
 {
     options.AddPolicy("CorsPolicy", policy =>
     {
-        var origins = new List<string>
+        var origins = new List<string>();
+
+        // Read AllowedOrigins from env var "AllowedOrigins" (comma separated)
+        var allowedOrigins = builder.Configuration["AllowedOrigins"]
+            ?? builder.Configuration["ALLOWED_ORIGINS"];
+
+        if (!string.IsNullOrWhiteSpace(allowedOrigins))
         {
-            // Production Frontend Origins
-            "https://aquora-webzio.vercel.app",
-            "https://aquora-backend.webziointernational.in",
-            "https://aquora.webziointernational.in",
-            "https://aquzio.webziotech.in",
-            "https://app.aquora.com",
-            "https://biodrops.in",
-            "https://www.biodrops.in",
-            
-            // Local Development Origins
-            "http://localhost:5173",
-            "http://localhost:5174",
-            "http://localhost:3000",
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:5174",
-            "http://127.0.0.1:3000"
-        };
-
-        // 1. Read from Env / AppSettings direct keys
-        var frontendUrl = builder.Configuration["FRONTEND_URL"];
-        if (!string.IsNullOrEmpty(frontendUrl))
-            origins.Add(frontendUrl);
-
-        var allowedOrigins = builder.Configuration["ALLOWED_ORIGINS"];
-        if (!string.IsNullOrEmpty(allowedOrigins))
             origins.AddRange(allowedOrigins.Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries).Select(o => o.Trim()));
+        }
 
-        // 2. Read from "Cors:AllowedOrigins" array/section
-        var corsSection = builder.Configuration.GetSection("Cors:AllowedOrigins");
-        if (corsSection.Exists())
+        // Default to localhost:5173 for development if no origins are configured
+        if (origins.Count == 0 && builder.Environment.IsDevelopment())
         {
-            var sectionOrigins = corsSection.Get<string[]>();
-            if (sectionOrigins != null)
-            {
-                origins.AddRange(sectionOrigins.Where(o => !string.IsNullOrEmpty(o)).Select(o => o.Trim()));
-            }
+            origins.Add("http://localhost:5173");
         }
 
         // Clean and deduplicate origins (remove trailing slashes to match exact browser origin strings)
@@ -293,21 +270,9 @@ builder.Services.AddCors(options =>
         policy.SetIsOriginAllowed(origin =>
               {
                   if (string.IsNullOrWhiteSpace(origin)) return false;
-                  try
-                  {
-                      var uri = new Uri(origin);
-                      var host = uri.Host;
-                      return host.EndsWith("vercel.app", StringComparison.OrdinalIgnoreCase) ||
-                             host.EndsWith("webziointernational.in", StringComparison.OrdinalIgnoreCase) ||
-                             host.Equals("app.aquora.com", StringComparison.OrdinalIgnoreCase) ||
-                             host.Equals("localhost", StringComparison.OrdinalIgnoreCase) ||
-                             host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-                             uniqueOrigins.Any(u => string.Equals(u, origin.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
-                  }
-                  catch
-                  {
-                      return false;
-                  }
+                  var cleanOrigin = origin.TrimEnd('/');
+                  return uniqueOrigins.Any(u => string.Equals(u, cleanOrigin, StringComparison.OrdinalIgnoreCase)) ||
+                         (builder.Environment.IsDevelopment() && (cleanOrigin.Contains("localhost") || cleanOrigin.Contains("127.0.0.1")));
               })
               .AllowAnyMethod()
               .AllowAnyHeader()

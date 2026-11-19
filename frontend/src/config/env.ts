@@ -14,24 +14,22 @@ const getEnvVar = (key: string): string | undefined => {
 const isProduction = import.meta.env.PROD || import.meta.env.MODE === 'production'
 const isDevelopment = import.meta.env.DEV || import.meta.env.MODE === 'development'
 
-let rawApiUrl = getEnvVar('VITE_API_URL')
+const rawApiUrl = getEnvVar('VITE_API_URL')
 
 // Validation in Production Environment
-if (isProduction) {
-  if (!rawApiUrl || rawApiUrl.includes('localhost') || rawApiUrl.includes('127.0.0.1')) {
-    console.error(
-      '[CRITICAL CONFIGURATION ERROR]: Production build detected without a valid VITE_API_URL environment variable! ' +
-      'API requests will fail or attempt to connect to localhost. Value received: "' + rawApiUrl + '"'
-    )
-  }
+if (isProduction && !rawApiUrl) {
+  console.error(
+    '[CRITICAL CONFIGURATION ERROR]: Production build detected without a valid VITE_API_URL environment variable! ' +
+    'API requests will fail or attempt to connect to localhost.'
+  )
 }
 
-const defaultProductionUrl = 'https://aquora-backend.webziointernational.in'
 const defaultLocalUrl = 'http://localhost:5000'
 
-let finalUrl = rawApiUrl || (isProduction ? defaultProductionUrl : defaultLocalUrl)
+const finalUrl = rawApiUrl || (isDevelopment ? defaultLocalUrl : '')
 
 const getSanitizedBaseUrl = (url: string): string => {
+  if (!url) return ''
   let cleaned = url.trim()
 
   // 1. Ensure scheme (http:// or https://)

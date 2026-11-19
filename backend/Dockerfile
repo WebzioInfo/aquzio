@@ -29,6 +29,9 @@ RUN dotnet publish Aquora.API.csproj -c Release --no-build -o /app/publish
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 
+# Install Kerberos/GSSAPI library required for Npgsql / PostgreSQL authentication
+RUN apt-get update && apt-get install -y libgssapi-krb5-2 && rm -rf /var/lib/apt/lists/*
+
 # Copy published binaries
 COPY --from=build /app/publish .
 
