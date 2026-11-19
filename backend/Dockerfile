@@ -1,4 +1,4 @@
-# Multi-stage Dockerfile for ASP.NET Core API Deployment on Railway
+# Multi-stage Dockerfile for ASP.NET Core API Deployment on Render
 
 # Stage 1: Build & Publish
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
@@ -34,7 +34,7 @@ COPY --from=build /app/publish .
 
 # Environment Defaults for Production
 ENV ASPNETCORE_ENVIRONMENT=Production
-EXPOSE 8080
+EXPOSE 10000
 
-# Dynamic PORT binding for Railway (binds to PORT provided by Railway or 8080 by default)
-ENTRYPOINT ["sh", "-c", "ASPNETCORE_URLS=http://+:${PORT:-8080} exec dotnet Aquora.API.dll"]
+# Dynamic PORT binding for Render (binds to PORT provided by Render or 10000 by default)
+ENTRYPOINT ["sh", "-c", "ASPNETCORE_URLS=http://0.0.0.0:${PORT:-10000} exec dotnet Aquora.API.dll"]
