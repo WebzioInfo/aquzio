@@ -15,6 +15,7 @@ namespace Aquora.Domain.Entities.QC
         public int DisplayOrder { get; set; }
         public string ResultInputType { get; set; } = "NUMERIC"; // NUMERIC, SELECT_DESCRIPTOR, SELECT_PRESENCE_ABSENCE
         public int RequiredDurationHours { get; set; } = 0; // 0 for immediate, 24/48/72 for incubation/delayed
+        public string Frequency { get; set; } = "DAILY"; // DAILY, WEEKLY, MONTHLY
     }
 
     public static class QCDefaultParameters
@@ -40,7 +41,15 @@ namespace Aquora.Domain.Entities.QC
             new() { Name = "Clostridia", Category = "MICROBIOLOGY", Unit = "CFU/100ml", MinWarning = null, MinAcceptable = 0, MaxAcceptable = 0, MaxWarning = null, DisplayOrder = 14, ResultInputType = "SELECT_PRESENCE_ABSENCE", RequiredDurationHours = 48 },
             new() { Name = "Aerobic Microbial Count 22°C", Category = "MICROBIOLOGY", Unit = "CFU/ml", MinWarning = null, MinAcceptable = 0, MaxAcceptable = 100, MaxWarning = null, DisplayOrder = 15, ResultInputType = "SELECT_PRESENCE_ABSENCE", RequiredDurationHours = 72 },
             new() { Name = "Aerobic Microbial Count 37°C", Category = "MICROBIOLOGY", Unit = "CFU/ml", MinWarning = null, MinAcceptable = 0, MaxAcceptable = 20, MaxWarning = null, DisplayOrder = 16, ResultInputType = "SELECT_PRESENCE_ABSENCE", RequiredDurationHours = 24 },
-            new() { Name = "Yeast & Mold", Category = "MICROBIOLOGY", Unit = "CFU/100ml", MinWarning = null, MinAcceptable = 0, MaxAcceptable = 0, MaxWarning = null, DisplayOrder = 17, ResultInputType = "SELECT_PRESENCE_ABSENCE", RequiredDurationHours = 72 }
+            new() { Name = "Yeast & Mold", Category = "MICROBIOLOGY", Unit = "CFU/100ml", MinWarning = null, MinAcceptable = 0, MaxAcceptable = 0, MaxWarning = null, DisplayOrder = 17, ResultInputType = "SELECT_PRESENCE_ABSENCE", RequiredDurationHours = 72 },
+
+            // Weekly Chemical Test Parameters (IS 14543)
+            new() { Name = "Calcium", Category = "CHEMICAL", Unit = "mg/L", MinWarning = 0, MinAcceptable = 0, MaxAcceptable = 75, MaxWarning = 100, DisplayOrder = 18, ResultInputType = "NUMERIC", RequiredDurationHours = 0, Frequency = "WEEKLY" },
+            new() { Name = "Magnesium", Category = "CHEMICAL", Unit = "mg/L", MinWarning = 0, MinAcceptable = 0, MaxAcceptable = 30, MaxWarning = 50, DisplayOrder = 19, ResultInputType = "NUMERIC", RequiredDurationHours = 0, Frequency = "WEEKLY" },
+            new() { Name = "Aluminium", Category = "CHEMICAL", Unit = "mg/L", MinWarning = 0, MinAcceptable = 0, MaxAcceptable = 0.03, MaxWarning = 0.05, DisplayOrder = 20, ResultInputType = "NUMERIC", RequiredDurationHours = 0, Frequency = "WEEKLY" },
+            new() { Name = "Sulphide", Category = "CHEMICAL", Unit = "mg/L", MinWarning = 0, MinAcceptable = 0, MaxAcceptable = 0.05, MaxWarning = 0.1, DisplayOrder = 21, ResultInputType = "NUMERIC", RequiredDurationHours = 0, Frequency = "WEEKLY" },
+            new() { Name = "Nitrate", Category = "CHEMICAL", Unit = "mg/L", MinWarning = 0, MinAcceptable = 0, MaxAcceptable = 45, MaxWarning = 50, DisplayOrder = 22, ResultInputType = "NUMERIC", RequiredDurationHours = 0, Frequency = "WEEKLY" },
+            new() { Name = "Nitrite", Category = "CHEMICAL", Unit = "mg/L", MinWarning = 0, MinAcceptable = 0, MaxAcceptable = 0.02, MaxWarning = 0.05, DisplayOrder = 23, ResultInputType = "NUMERIC", RequiredDurationHours = 0, Frequency = "WEEKLY" }
         };
 
         public static string NormalizeKey(string name)

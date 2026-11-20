@@ -9,6 +9,7 @@ using Aquora.Application.DTOs.Public;
 using Aquora.Application.Interfaces;
 using Aquora.Application.Interfaces.Services;
 using Aquora.Domain.Entities;
+using Aquora.Domain.Entities.QC;
 
 namespace Aquora.Application.Services
 {
@@ -31,7 +32,7 @@ namespace Aquora.Application.Services
             _logger = logger;
         }
 
-        public async Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(string batchNumber, CancellationToken cancellationToken = default)
+        public async Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(string batchNumber, bool full = false, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(batchNumber))
             {
@@ -56,7 +57,7 @@ namespace Aquora.Application.Services
                         .FirstOrDefaultAsync(t => t.Id == _tenantProvider.TenantId && t.IsActive && !t.IsDeleted && t.IsBiodropsProduction, cancellationToken);
                     if (preResolvedTenant != null)
                     {
-                        var result = await VerifyBatchInTenantScopeAsync(preResolvedTenant, normalizedBatch, batchNumber, cancellationToken);
+                        var result = await VerifyBatchInTenantScopeAsync(preResolvedTenant, normalizedBatch, batchNumber, full, cancellationToken);
                         if (result != null)
                         {
                             return result;
@@ -76,7 +77,7 @@ namespace Aquora.Application.Services
                 {
                     try
                     {
-                        var tenantResult = await VerifyBatchInTenantScopeAsync(tenant, normalizedBatch, batchNumber, cancellationToken);
+                        var tenantResult = await VerifyBatchInTenantScopeAsync(tenant, normalizedBatch, batchNumber, full, cancellationToken);
                         if (tenantResult != null)
                         {
                             if (tenantResult.Code == "REPORT_NOT_PUBLIC")
@@ -147,6 +148,7 @@ namespace Aquora.Application.Services
             Tenant platformTenant,
             string normalizedBatch,
             string originalBatchNumber,
+            bool full,
             CancellationToken cancellationToken)
         {
             if (platformTenant == null || !platformTenant.IsBiodropsProduction || !platformTenant.IsActive || platformTenant.IsDeleted)
@@ -253,10 +255,35 @@ namespace Aquora.Application.Services
             }
             report.Results = resultsList;
 
-            var qcSettings = await dbContext.QCSettings
-                .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"QCSettings\" WHERE \"TenantId\" = '{report.TenantId}'")
-                .AsNoTracking()
-                .FirstOrDefaultAsync(cancellationToken);
+            QCSettings? qcSettings = null;
+            try
+            {
+                qcSettings = await dbContext.QCSettings
+                    .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"QCSettings\" WHERE \"TenantId\" = '{report.TenantId}'")
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PUBLIC BATCH VERIFICATION] Could not query QCSettings for schema {Schema}: {Message}. Attempting auto-repair...", schemaName, ex.Message);
+                try
+                {
+                    await dbContext.Database.ExecuteSqlRawAsync(
+                        $"ALTER TABLE \"{schemaName}\".\"QCSettings\" ADD COLUMN IF NOT EXISTS \"FssaiNumber\" text NULL; " +
+                        $"ALTER TABLE \"{schemaName}\".\"QCSettings\" ADD COLUMN IF NOT EXISTS \"BisNumber\" text NULL; " +
+                        $"ALTER TABLE \"{schemaName}\".\"QCSettings\" ADD COLUMN IF NOT EXISTS \"AdditionalLicensesJson\" text NULL;",
+                        cancellationToken);
+
+                    qcSettings = await dbContext.QCSettings
+                        .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"QCSettings\" WHERE \"TenantId\" = '{report.TenantId}'")
+                        .AsNoTracking()
+                        .FirstOrDefaultAsync(cancellationToken);
+                }
+                catch (Exception repairEx)
+                {
+                    _logger.LogError(repairEx, "[PUBLIC BATCH VERIFICATION] Auto-repair of QCSettings columns failed for schema {Schema}", schemaName);
+                }
+            }
 
             var allProdBatchesForReport = await dbContext.ProductionBatches
                 .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"ProductionBatches\" WHERE \"TenantId\" = '{report.TenantId}' AND \"IsDeleted\" = false")
@@ -275,15 +302,74 @@ namespace Aquora.Application.Services
             string? phVal = null;
             string? tdsVal = null;
             string? turbidityVal = null;
+            string? colourVal = null;
+            string? odourVal = null;
+            string? tasteVal = null;
+            string? sulphateVal = null;
+            string? chlorideVal = null;
+            string? alkalinityVal = null;
+            string? chlorineVal = null;
+            string? ecoliVal = null;
+            string? coliformVal = null;
+            string? pseudomonasVal = null;
+            string? clostridiaVal = null;
+            string? amc22Val = null;
+            string? amc37Val = null;
+            string? yeastMoldVal = null;
             bool microPassed = true;
             bool sterilizationPassed = true;
+
+            var parameterDtos = new List<PublicWaterTestParameterDto>();
 
             if (report.Results != null)
             {
                 foreach (var res in report.Results)
                 {
                     var pName = res.Parameter?.Name?.ToLowerInvariant().Trim() ?? string.Empty;
-                    var valStr = res.Value?.ToString("0.#") ?? res.StringValue ?? null;
+                    var paramDisplayName = res.Parameter?.Name ?? string.Empty;
+                    var category = res.Parameter?.Category ?? string.Empty;
+                    var unit = res.Parameter?.Unit ?? string.Empty;
+                    var valStr = !string.IsNullOrWhiteSpace(res.StringValue)
+                        ? res.StringValue.Trim()
+                        : (res.Value.HasValue ? res.Value.Value.ToString("0.##") : null);
+                    var status = !string.IsNullOrWhiteSpace(res.QualityStatus) ? res.QualityStatus : (res.IsPass ? "PASS" : "FAIL");
+
+                    string? standard = null;
+                    if (res.Parameter != null)
+                    {
+                        if (res.Parameter.MinAcceptable.HasValue && res.Parameter.MaxAcceptable.HasValue)
+                        {
+                            standard = $"{res.Parameter.MinAcceptable} - {res.Parameter.MaxAcceptable}";
+                        }
+                        else if (res.Parameter.MaxAcceptable.HasValue)
+                        {
+                            standard = $"≤ {res.Parameter.MaxAcceptable}";
+                        }
+                        else if (res.Parameter.MinAcceptable.HasValue)
+                        {
+                            standard = $"≥ {res.Parameter.MinAcceptable}";
+                        }
+                        else if (category.Equals("MICROBIOLOGY", StringComparison.OrdinalIgnoreCase))
+                        {
+                            standard = "Absent";
+                        }
+                        else if (pName.Contains("colour") || pName.Contains("color") || pName.Contains("odour") || pName.Contains("taste"))
+                        {
+                            standard = "Agreeable";
+                        }
+                    }
+
+                    parameterDtos.Add(new PublicWaterTestParameterDto
+                    {
+                        Name = paramDisplayName,
+                        Category = category,
+                        Result = valStr,
+                        Value = res.Value,
+                        Unit = unit,
+                        Standard = standard,
+                        Status = status,
+                        QualityStatus = status
+                    });
 
                     if (pName == "ph")
                     {
@@ -297,8 +383,64 @@ namespace Aquora.Application.Services
                     {
                         turbidityVal = valStr;
                     }
+                    else if (pName.Contains("colour") || pName.Contains("color"))
+                    {
+                        colourVal = valStr;
+                    }
+                    else if (pName.Contains("odour") || pName.Contains("odor"))
+                    {
+                        odourVal = valStr;
+                    }
+                    else if (pName.Contains("taste"))
+                    {
+                        tasteVal = valStr;
+                    }
+                    else if (pName.Contains("sulphate") || pName.Contains("sulfate"))
+                    {
+                        sulphateVal = valStr;
+                    }
+                    else if (pName.Contains("chloride"))
+                    {
+                        chlorideVal = valStr;
+                    }
+                    else if (pName.Contains("alkalinity"))
+                    {
+                        alkalinityVal = valStr;
+                    }
+                    else if (pName.Contains("chlorine"))
+                    {
+                        chlorineVal = valStr;
+                    }
+                    else if (pName.Contains("e.coli") || pName.Contains("ecoli"))
+                    {
+                        ecoliVal = valStr;
+                    }
+                    else if (pName.Contains("coliform"))
+                    {
+                        coliformVal = valStr;
+                    }
+                    else if (pName.Contains("pseudomonas"))
+                    {
+                        pseudomonasVal = valStr;
+                    }
+                    else if (pName.Contains("clostridia"))
+                    {
+                        clostridiaVal = valStr;
+                    }
+                    else if (pName.Contains("22"))
+                    {
+                        amc22Val = valStr;
+                    }
+                    else if (pName.Contains("37"))
+                    {
+                        amc37Val = valStr;
+                    }
+                    else if (pName.Contains("yeast") || pName.Contains("mold"))
+                    {
+                        yeastMoldVal = valStr;
+                    }
 
-                    if (res.Parameter?.Category?.ToUpperInvariant() == "MICROBIOLOGY")
+                    if (category.ToUpperInvariant() == "MICROBIOLOGY")
                     {
                         if (res.QualityStatus == "FAIL" || !res.IsPass)
                         {
@@ -324,6 +466,27 @@ namespace Aquora.Application.Services
                 ? qcSettings.StandardComplianceType
                 : "BIS IS 14543";
 
+            var fssaiVal = !string.IsNullOrWhiteSpace(qcSettings?.FssaiNumber)
+                ? qcSettings.FssaiNumber.Trim()
+                : (!string.IsNullOrWhiteSpace(platformTenant.LicenseNumber) ? platformTenant.LicenseNumber.Trim() : null);
+
+            var bisVal = !string.IsNullOrWhiteSpace(qcSettings?.BisNumber)
+                ? qcSettings.BisNumber.Trim()
+                : null;
+
+            List<PublicCustomLicenseDto>? customLicenses = null;
+            if (!string.IsNullOrWhiteSpace(qcSettings?.AdditionalLicensesJson))
+            {
+                try
+                {
+                    customLicenses = System.Text.Json.JsonSerializer.Deserialize<List<PublicCustomLicenseDto>>(qcSettings.AdditionalLicensesJson);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PUBLIC BATCH VERIFICATION] Could not parse AdditionalLicensesJson for tenant {TenantId}", platformTenant.Id);
+                }
+            }
+
             return new PublicBatchVerificationResponseDto
             {
                 Success = true,
@@ -331,6 +494,16 @@ namespace Aquora.Application.Services
                 Data = new PublicBatchVerificationDataDto
                 {
                     BatchNumber = report.BatchNumber,
+                    ReportNumber = full ? $"RPT-{report.BatchNumber}" : null,
+                    SampleNumber = full ? report.SampleNumber : null,
+                    SampleCode = full ? (report.SampleNumber ?? report.BatchNumber) : null,
+                    TestedBy = full ? report.TestedBy : null,
+                    VerifiedBy = full ? report.VerifiedBy : null,
+                    CollectedBy = full ? report.CollectedBy : null,
+                    ReportType = full ? report.ReportType : null,
+                    SampleTime = full && report.SampleTime.HasValue ? report.SampleTime.Value.ToString("dd MMM yyyy, hh:mm tt") : null,
+                    CollectedOn = full && report.SampleTime.HasValue ? report.SampleTime.Value.ToString("dd MMM yyyy, hh:mm tt") : null,
+                    Remarks = full ? report.Remarks : null,
                     Manufacturer = new PublicManufacturerDto
                     {
                         Id = platformTenant.Id,
@@ -341,7 +514,7 @@ namespace Aquora.Application.Services
                         LogoUrl = platformTenant.LogoUrl,
                         Address = companyAddress,
                         Location = companyAddress ?? "India",
-                        LicenseNumber = platformTenant.LicenseNumber,
+                        LicenseNumber = fssaiVal,
                         GstNumber = platformTenant.GstNumber,
                         PanNumber = platformTenant.PanNumber,
                         Email = platformTenant.OwnerEmail,
@@ -360,17 +533,33 @@ namespace Aquora.Application.Services
                     },
                     Licenses = new PublicLicensesDto
                     {
-                        Fssai = platformTenant.LicenseNumber,
-                        Bis = complianceType
+                        Fssai = fssaiVal,
+                        Bis = bisVal,
+                        Others = customLicenses != null && customLicenses.Count > 0 ? customLicenses : null
                     },
                     WaterQuality = new PublicWaterQualityDto
                     {
                         Ph = phVal,
                         Tds = tdsVal,
                         Turbidity = turbidityVal,
+                        Colour = full ? colourVal : null,
+                        Odour = full ? odourVal : null,
+                        Taste = full ? tasteVal : null,
+                        Sulphate = full ? sulphateVal : null,
+                        Chloride = full ? chlorideVal : null,
+                        Alkalinity = full ? alkalinityVal : null,
+                        ResidualFreeChlorine = full ? chlorineVal : null,
+                        EColi = full ? ecoliVal : null,
+                        Coliform = full ? coliformVal : null,
+                        Pseudomonas = full ? pseudomonasVal : null,
+                        Clostridia = full ? clostridiaVal : null,
+                        AerobicCount22 = full ? amc22Val : null,
+                        AerobicCount37 = full ? amc37Val : null,
+                        YeastAndMold = full ? yeastMoldVal : null,
                         Microbiology = microPassed ? "Passed" : "Failed",
                         Sterilization = sterilizationPassed ? "Passed" : "Failed"
                     },
+                    Parameters = full ? parameterDtos : null,
                     Report = new PublicReportDto
                     {
                         Available = true,

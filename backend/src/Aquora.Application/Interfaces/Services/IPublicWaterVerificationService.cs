@@ -6,6 +6,6 @@ namespace Aquora.Application.Interfaces.Services
 {
     public interface IPublicWaterVerificationService
     {
-        Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(string batchNumber, CancellationToken cancellationToken = default);
+        Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(string batchNumber, bool full = false, CancellationToken cancellationToken = default);
     }
 }

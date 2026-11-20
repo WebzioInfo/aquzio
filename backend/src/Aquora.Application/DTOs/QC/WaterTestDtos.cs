@@ -41,6 +41,7 @@ namespace Aquora.Application.DTOs.QC
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
         public string Category { get; set; } = string.Empty;
+        public string Frequency { get; set; } = "DAILY";
         public string Unit { get; set; } = string.Empty;
         public double? MinWarning { get; set; }
         public double? MinAcceptable { get; set; }
@@ -206,6 +207,11 @@ namespace Aquora.Application.DTOs.QC
         public string LabAddress { get; set; } = string.Empty;
         public string ContactEmail { get; set; } = string.Empty;
         public string NotificationRecipients { get; set; } = string.Empty;
+
+        // Regulatory & Plant Licenses
+        public string? FssaiNumber { get; set; }
+        public string? BisNumber { get; set; }
+        public string? AdditionalLicensesJson { get; set; }
     }
 
     public class QCAuditLogDto

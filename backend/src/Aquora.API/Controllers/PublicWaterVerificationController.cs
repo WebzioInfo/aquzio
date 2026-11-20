@@ -34,7 +34,7 @@ namespace Aquora.API.Controllers
         /// <returns>Public batch verification response object</returns>
         [HttpGet("batches/{batchNumber}")]
         [HttpGet("{batchNumber}")]
-        public async Task<IActionResult> VerifyBatch([FromRoute] string batchNumber, CancellationToken cancellationToken = default)
+        public async Task<IActionResult> VerifyBatch([FromRoute] string batchNumber, [FromQuery] bool full = false, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(batchNumber))
             {
@@ -47,7 +47,7 @@ namespace Aquora.API.Controllers
                 });
             }
 
-            var result = await _verificationService.VerifyBatchAsync(batchNumber, cancellationToken);
+            var result = await _verificationService.VerifyBatchAsync(batchNumber, full, cancellationToken);
 
             if (!result.Success && result.Code == "BATCH_NOT_FOUND")
             {

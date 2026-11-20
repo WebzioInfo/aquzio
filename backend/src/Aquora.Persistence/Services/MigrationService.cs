@@ -1631,6 +1631,11 @@ namespace Aquora.Persistence.Services
                                             ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""MaxAcceptable"" double precision NULL;
                                             ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""CreatedByIP"" text NULL;
                                             ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""UpdatedByIP"" text NULL;
+                                            ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""Frequency"" text NOT NULL DEFAULT 'DAILY';
+
+                                            ALTER TABLE ""{schema}"".""QCSettings"" ADD COLUMN IF NOT EXISTS ""FssaiNumber"" text NULL;
+                                            ALTER TABLE ""{schema}"".""QCSettings"" ADD COLUMN IF NOT EXISTS ""BisNumber"" text NULL;
+                                            ALTER TABLE ""{schema}"".""QCSettings"" ADD COLUMN IF NOT EXISTS ""AdditionalLicensesJson"" text NULL;
 
                                             CREATE TABLE IF NOT EXISTS ""{schema}"".""WaterTestReports"" (
                                                 ""Id"" uuid NOT NULL PRIMARY KEY,
