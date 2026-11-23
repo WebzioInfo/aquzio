@@ -37,6 +37,7 @@ namespace Aquora.Application
             services.AddScoped<IHealthService, HealthService>();
             services.AddScoped<IQualityEvaluationService, QualityEvaluationService>();
             services.AddScoped<IQCPdfCertificateService, QCPdfCertificateService>();
+            services.AddScoped<IInvoicePdfService, InvoicePdfService>();
             services.AddScoped<IWaterTestService, WaterTestService>();
             services.AddScoped<IPublicWaterVerificationService, PublicWaterVerificationService>();
             services.AddScoped<IOperationsIssueService, OperationsIssueService>();

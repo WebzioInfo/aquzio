@@ -16,6 +16,7 @@ import { customersService, type ApplicablePriceResponseDto } from '../../service
 import { simpleAccountsService } from '../../services/simpleAccounts'
 import { caseConfigurationsService, type CaseConfiguration } from '../../services/caseConfigurations'
 import { QuickCreateCaseConfigModal } from './sales/QuickCreateCaseConfigModal'
+import { InvoiceViewerModal } from './sales/InvoiceViewerModal'
 import { SearchableDropdown } from '../../components/ui/SearchableDropdown'
 import { QuickAddCustomerModal } from '../../components/modals/QuickAddCustomerModal'
 import { CustomerProductPricingModal } from '../../components/modals/CustomerProductPricingModal'
@@ -166,7 +167,7 @@ const OrderItemsTableSection: React.FC<{
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors cursor-pointer shadow-2xs"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>+ Add Product</span>
+          <span>Add Product</span>
         </button>
       </div>
 
@@ -371,7 +372,7 @@ const OrderItemsTableSection: React.FC<{
           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-blue-600 hover:text-blue-700 bg-blue-50/90 hover:bg-blue-100 border border-blue-200/80 rounded-lg transition-colors cursor-pointer"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>+ Add Product Row</span>
+          <span>Add Product Row</span>
         </button>
       </div>
     </div>
@@ -509,6 +510,12 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
   const [isProductPricingModalOpen, setIsProductPricingModalOpen] = useState(false)
   const [pricingCustomer, setPricingCustomer] = useState<{ id: string; name: string; code?: string } | null>(null)
 
+  // Invoice & Billing Engine State (BillAura-aligned)
+  const [isInvoiceViewerOpen, setIsInvoiceViewerOpen] = useState(false)
+  const [invoiceModalTxn, setInvoiceModalTxn] = useState<SalesTransaction | null>(null)
+  const [formInvoiceType, setFormInvoiceType] = useState<'B2B' | 'B2C'>('B2B')
+  const [formBillType, setFormBillType] = useState<'Tax Invoice' | 'Bill of Supply'>('Tax Invoice')
+
   // Return specific fields
   const [formOriginalInvoice, setFormOriginalInvoice] = useState('')
   const [formReturnReason, setFormReturnReason] = useState('')
@@ -609,8 +616,11 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
     queryKey: ['activeCustomersForSales'],
     queryFn: async () => {
       const res = await customersService.getCustomers(1, 100, '', '', 'Active')
-      return res.data?.items.filter(c => c.isActive) || []
-    }
+      const items = res.data?.items || []
+      return items.filter(c => (c.status ? c.status === 'Active' : c.isActive))
+    },
+    retry: 2,
+    staleTime: 30000
   })
   const customers = customersData || []
 
@@ -995,6 +1005,13 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
     const found = customers.find(c => c.id === customerId)
     if (found) {
       setCustomerSearch(found.customerName)
+      // Auto-detect B2B / B2C and Tax Invoice alignment
+      if (found.gstNumber || found.customerType === 'B2B' || found.customerCode?.startsWith('B2B')) {
+        setFormInvoiceType('B2B')
+        setFormBillType('Tax Invoice')
+      } else {
+        setFormInvoiceType('B2C')
+      }
       if (found.paymentTerms) {
         setFormPaymentTerms(found.paymentTerms)
         if (found.paymentTerms === 'COD' && formPaymentMethod === 'Credit') {
@@ -1323,6 +1340,8 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
     setApplicablePricing(null)
     setFormBankAccountId('')
     setFormCashBookId('')
+    setFormInvoiceType('B2B')
+    setFormBillType('Tax Invoice')
     setFormOriginalInvoice('')
     setFormReturnReason('')
     setFormReturnCondition('Good — Restock')
@@ -1503,6 +1522,8 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
 
     try {
       const meta = currentTxn.metadataJson ? JSON.parse(currentTxn.metadataJson) : {}
+      setFormInvoiceType((currentTxn.invoiceType as any) || (meta.invoiceType as any) || (matchedCustomer?.gstNumber ? 'B2B' : 'B2C'))
+      setFormBillType((currentTxn.billType as any) || (meta.billType as any) || 'Tax Invoice')
       setFormOriginalInvoice(meta.originalInvoice || '')
       setFormReturnReason(meta.returnReason || '')
       setFormReturnCondition(meta.returnCondition || 'Good')
@@ -1789,6 +1810,8 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
         amountReceived: effectiveAmountReceived,
         items: itemsPayload,
         metadataJson: JSON.stringify({
+          invoiceType: formInvoiceType,
+          billType: formBillType,
           caseConfigurationId: firstItem.caseConfigurationId,
           unitsPerCase: firstItem.unitsPerCase || 24,
           totalUnits: totalCases * (firstItem.unitsPerCase || 24),
@@ -2005,7 +2028,10 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
             </div>
             <div className="flex items-center gap-2 ml-auto">
               <button
-                onClick={() => handleDownloadPDF(selectedTxn)}
+                onClick={() => {
+                  setInvoiceModalTxn(selectedTxn)
+                  setIsInvoiceViewerOpen(true)
+                }}
                 className="h-[32px] px-3 bg-blue-600 hover:bg-blue-700 text-white text-[12px] font-bold rounded-lg flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
               >
                 <Printer className="w-3.5 h-3.5" />
@@ -2763,7 +2789,14 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
             )}
           </SectionCard>
         </div>
-      </PageContainer>
+        {/* BillAura-style GST & Bill of Supply Invoice Viewer & Downloader Modal */}
+      <InvoiceViewerModal
+        isOpen={isInvoiceViewerOpen}
+        onClose={() => setIsInvoiceViewerOpen(false)}
+        transaction={invoiceModalTxn}
+        companySettings={companySettings}
+      />
+    </PageContainer>
     )
   }
 
@@ -3140,6 +3173,16 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
                         >
                           <Eye className="w-3.5 h-3.5" />
                         </button>
+                        <button
+                          onClick={() => {
+                            setInvoiceModalTxn(txn)
+                            setIsInvoiceViewerOpen(true)
+                          }}
+                          title="View & Print Invoice"
+                          className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5" />
+                        </button>
                         {canWrite && (txn.outstandingAmount ?? Math.max(0, (txn.totalAmount || 0) - (txn.amountReceived || 0))) > 0 && txn.status !== 'Cancelled' && (
                           <button
                             onClick={() => handleOpenCollectModal(txn)}
@@ -3336,6 +3379,79 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
                 </div>
               </div>
 
+              {/* Invoice Category & Document Type */}
+              {formType === 'Sales Dispatch' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 bg-slate-50/80 border border-slate-200 rounded-xl">
+                  {/* Invoice Category */}
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[12px] font-semibold text-slate-700">Invoice Category</span>
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        {formInvoiceType === 'B2B' ? 'With GSTIN' : 'Retail / Cash'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 h-[38px]">
+                      <button
+                        type="button"
+                        onClick={() => setFormInvoiceType('B2B')}
+                        className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          formInvoiceType === 'B2B'
+                            ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                            : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        B2B (Business)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormInvoiceType('B2C')}
+                        className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          formInvoiceType === 'B2C'
+                            ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                            : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        B2C (Retail)
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Document Type */}
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-[12px] font-semibold text-slate-700">Document Type</span>
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        {formBillType === 'Tax Invoice' ? 'GST Breakdown' : 'Non-Taxable'}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 h-[38px]">
+                      <button
+                        type="button"
+                        onClick={() => setFormBillType('Tax Invoice')}
+                        className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          formBillType === 'Tax Invoice'
+                            ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                            : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        Tax Invoice
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormBillType('Bill of Supply')}
+                        className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                          formBillType === 'Bill of Supply'
+                            ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                            : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        Bill of Supply
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* SINGLE PRODUCT SELECTION (Only for Non-Dispatch transactions like Returns, Damage, Adjustments) */}
               {formType !== 'Sales Dispatch' && (
                 <>
@@ -3411,7 +3527,7 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
                 <div className="space-y-4 border-t border-slate-100 pt-4">
                   {/* Shared Customer Selection */}
                   <SearchableDropdown
-                    label="Customer / Distributor *"
+                    label="Customer / Distributor"
                     required
                     value={formCustomerId}
                     onChange={handleCustomerSelect}
@@ -3423,7 +3539,7 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
                     }))}
                     placeholder="Search customer by name, code, or phone..."
                     onQuickAdd={handleQuickCreateCustomer}
-                    quickAddLabel="+ Quick Add Customer"
+                    quickAddLabel="Quick Add Customer"
                   />
 
                   {/* Dynamic Multi-Product Order Items Table */}
@@ -4134,22 +4250,93 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
               {/* Multi-Product Sales Dispatch Form */}
               {formType === 'Sales Dispatch' && (
                 <div className="space-y-4 border-t border-slate-100 pt-4">
-                  {/* Shared Customer Selection */}
-                  <SearchableDropdown
-                    label="Customer / Distributor *"
-                    required
-                    value={formCustomerId}
-                    onChange={handleCustomerSelect}
-                    options={customers.map(c => ({
-                      id: c.id,
-                      name: c.customerName,
-                      subtitle: c.phone || c.customerCode,
-                      badge: c.customerType
-                    }))}
-                    placeholder="Search customer by name, code, or phone..."
-                    onQuickAdd={handleQuickCreateCustomer}
-                    quickAddLabel="+ Quick Add Customer"
-                  />
+                  {/* Invoice Category & Document Type */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3 bg-slate-50/80 border border-slate-200 rounded-xl">
+
+                    {/* Invoice Category */}
+                    <div className="flex flex-col">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[12px] font-semibold text-slate-700">Invoice Category</span>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {formInvoiceType === 'B2B' ? 'With GSTIN' : 'Retail / Cash'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 h-[38px]">
+                        <button
+                          type="button"
+                          onClick={() => setFormInvoiceType('B2B')}
+                          className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                            formInvoiceType === 'B2B'
+                              ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                              : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          B2B (Business)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormInvoiceType('B2C')}
+                          className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                            formInvoiceType === 'B2C'
+                              ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                              : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          B2C (Retail)
+                        </button>
+                      </div>
+                    </div>
+                    {/* Document Type */}
+                    <div className="flex flex-col">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[12px] font-semibold text-slate-700">Document Type</span>
+                        <span className="text-[11px] text-slate-500 font-medium">
+                          {formBillType === 'Tax Invoice' ? 'GST Breakdown' : 'Non-Taxable'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 h-[38px]">
+                        <button
+                          type="button"
+                          onClick={() => setFormBillType('Tax Invoice')}
+                          className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                            formBillType === 'Tax Invoice'
+                              ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                              : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          Tax Invoice
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setFormBillType('Bill of Supply')}
+                          className={`px-3 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                            formBillType === 'Bill of Supply'
+                              ? 'bg-[#12A89A] text-white border-[#12A89A] shadow-xs'
+                              : 'bg-white text-slate-650 border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          Bill of Supply
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                {/* Shared Customer Selection */}
+                <SearchableDropdown
+                  label="Customer / Distributor"
+                  required
+                  value={formCustomerId}
+                  onChange={handleCustomerSelect}
+                  options={customers.map(c => ({
+                    id: c.id,
+                    name: c.customerName,
+                    subtitle: c.phone || c.customerCode,
+                    badge: c.customerType
+                  }))}
+                  placeholder="Search customer by name, code, or phone..."
+                  onQuickAdd={handleQuickCreateCustomer}
+                  quickAddLabel="Quick Add Customer"
+                />
 
                   {/* Dynamic Multi-Product Order Items Table */}
                   <OrderItemsTableSection
@@ -4903,6 +5090,13 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
           }}
         />
       )}
+      {/* BillAura-style GST & Bill of Supply Invoice Viewer & Downloader Modal */}
+      <InvoiceViewerModal
+        isOpen={isInvoiceViewerOpen}
+        onClose={() => setIsInvoiceViewerOpen(false)}
+        transaction={invoiceModalTxn}
+        companySettings={companySettings}
+      />
     </PageContainer>
   )
 }

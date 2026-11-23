@@ -38,6 +38,8 @@ export interface SalesTransaction {
   sgst?: number
   igst?: number
   metadataJson?: string | null
+  invoiceType?: string | null
+  billType?: string | null
 
   totalAmount?: number
   amountReceived?: number
@@ -339,5 +341,19 @@ export const salesService = {
     if (params.toString()) url += `?${params.toString()}`
     const res = await api.get<ApiResponse<OwnerSalesOverview>>(url)
     return res.data
+  },
+
+  downloadInvoicePdf: async (id: string, transactionNumber?: string) => {
+    const res = await api.get(`/api/v1/sales/${id}/invoice-pdf`, {
+      responseType: 'blob'
+    })
+    const url = window.URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }))
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `Invoice_${transactionNumber || id.slice(0, 8)}.pdf`)
+    document.body.appendChild(link)
+    link.click()
+    link.parentNode?.removeChild(link)
+    window.URL.revokeObjectURL(url)
   }
 }
