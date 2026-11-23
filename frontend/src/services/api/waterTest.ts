@@ -4,6 +4,7 @@ export interface WaterTestParameter {
     id: string;
     name: string;
     category: string;
+    frequency?: 'DAILY' | 'WEEKLY' | 'MONTHLY' | string;
     unit: string;
     minWarning?: number | null;
     minAcceptable?: number | null;
@@ -173,6 +174,11 @@ export interface ResolveComplianceRequest {
     resolutionNotes: string;
 }
 
+export interface CustomLicenseItem {
+    name: string;
+    number: string;
+}
+
 export interface QCSettings {
     autoGenerateCAPAOnFailure: boolean;
     requireVerificationBeforeSubmit: boolean;
@@ -181,6 +187,9 @@ export interface QCSettings {
     labAddress: string;
     contactEmail: string;
     notificationRecipients: string;
+    fssaiNumber?: string;
+    bisNumber?: string;
+    additionalLicensesJson?: string;
 }
 
 export interface QCAuditLog {

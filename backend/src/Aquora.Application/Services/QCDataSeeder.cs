@@ -83,6 +83,12 @@ namespace Aquora.Application.Services
                         changed = true;
                     }
 
+                    if (string.IsNullOrWhiteSpace(existing.Frequency))
+                    {
+                        existing.Frequency = def.Frequency ?? "DAILY";
+                        changed = true;
+                    }
+
                     if (changed)
                     {
                         existing.UpdatedAt = DateTime.UtcNow;
@@ -104,6 +110,7 @@ namespace Aquora.Application.Services
                         MaxAcceptable = def.MaxAcceptable,
                         MaxWarning = def.MaxWarning,
                         RequiredDurationHours = def.RequiredDurationHours,
+                        Frequency = def.Frequency ?? "DAILY",
                         IsActive = true,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = createdBy

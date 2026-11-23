@@ -30,6 +30,7 @@ export const ParametersManagementPage: React.FC = () => {
   const [parameters, setParameters] = useState<WaterTestParameter[]>([]);
   const [search, setSearch] = useState('');
   const [filterCategory, setFilterCategory] = useState('ALL');
+  const [filterFrequency, setFilterFrequency] = useState('ALL');
 
   // Parameter Edit Modal State
   const [editingParam, setEditingParam] = useState<Partial<WaterTestParameter> | null>(null);
@@ -70,6 +71,7 @@ export const ParametersManagementPage: React.FC = () => {
         id: editingParam.id,
         name: editingParam.name.trim(),
         category: editingParam.category || 'PHYSICAL',
+        frequency: editingParam.frequency || 'DAILY',
         unit: editingParam.unit || '—',
         minWarning: minWarn,
         minAcceptable: minAcc,
@@ -90,8 +92,10 @@ export const ParametersManagementPage: React.FC = () => {
 
   const filteredParameters = parameters.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
-    if (filterCategory !== 'ALL') return matchesSearch && p.category === filterCategory;
-    return matchesSearch;
+    const matchesCategory = filterCategory === 'ALL' || p.category === filterCategory;
+    const pFreq = (p.frequency || 'DAILY').toUpperCase();
+    const matchesFrequency = filterFrequency === 'ALL' || pFreq === filterFrequency;
+    return matchesSearch && matchesCategory && matchesFrequency;
   });
 
   const columns: ColumnDef<WaterTestParameter>[] = [
@@ -119,6 +123,33 @@ export const ParametersManagementPage: React.FC = () => {
           {row.category}
         </EnterpriseBadge>
       )
+    },
+    {
+      id: 'frequency',
+      header: 'Testing Schedule',
+      accessorKey: 'frequency',
+      cell: (row) => {
+        const freq = (row.frequency || 'DAILY').toUpperCase();
+        if (freq === 'MONTHLY') {
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+              Monthly
+            </span>
+          );
+        }
+        if (freq === 'WEEKLY') {
+          return (
+            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-purple-100 text-purple-800 border border-purple-200">
+              Weekly
+            </span>
+          );
+        }
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-800 border border-blue-200">
+            Daily
+          </span>
+        );
+      }
     },
     {
       id: 'duration',
@@ -210,8 +241,8 @@ export const ParametersManagementPage: React.FC = () => {
       </div>
 
       {/* Filter Bar */}
-      <EnterpriseCard className="p-4 bg-white border border-slate-200 shadow-sm">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+      <EnterpriseCard className="p-4 bg-white border border-slate-200 shadow-sm space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-center">
           <div className="md:col-span-2">
             <EnterpriseInput
               placeholder="Search parameter by name..."
@@ -230,6 +261,41 @@ export const ParametersManagementPage: React.FC = () => {
               { value: 'MICROBIOLOGY', label: 'Microbiological Organisms' }
             ]}
           />
+          <EnterpriseSelect
+            value={filterFrequency}
+            onChange={(e) => setFilterFrequency(e.target.value)}
+            options={[
+              { value: 'ALL', label: 'All Schedules (Daily / Weekly / Monthly)' },
+              { value: 'DAILY', label: 'Daily Parameters' },
+              { value: 'WEEKLY', label: 'Weekly Parameters' },
+              { value: 'MONTHLY', label: 'Monthly Parameters' }
+            ]}
+          />
+        </div>
+
+        {/* Quick Filter Schedule Tabs */}
+        <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 text-xs">
+          <span className="text-slate-500 font-semibold mr-1">Testing Schedule:</span>
+          {(['ALL', 'DAILY', 'WEEKLY', 'MONTHLY'] as const).map((tab) => {
+            const count = tab === 'ALL' 
+              ? parameters.length 
+              : parameters.filter(p => (p.frequency || 'DAILY').toUpperCase() === tab).length;
+            const isActive = filterFrequency === tab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setFilterFrequency(tab)}
+                className={`px-3 py-1 rounded-full font-medium transition-colors cursor-pointer text-xs ${
+                  isActive 
+                    ? 'bg-[#05303B] text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {tab === 'ALL' ? 'All Parameters' : tab.charAt(0) + tab.slice(1).toLowerCase()} ({count})
+              </button>
+            );
+          })}
         </div>
       </EnterpriseCard>
 
@@ -258,7 +324,18 @@ export const ParametersManagementPage: React.FC = () => {
               required
             />
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <EnterpriseSelect
+                label="Testing Schedule *"
+                value={editingParam.frequency || 'DAILY'}
+                onChange={(e) => setEditingParam({ ...editingParam, frequency: e.target.value })}
+                options={[
+                  { value: 'DAILY', label: 'Daily Parameter' },
+                  { value: 'WEEKLY', label: 'Weekly Parameter' },
+                  { value: 'MONTHLY', label: 'Monthly Parameter' }
+                ]}
+              />
+
               <EnterpriseSelect
                 label="Category"
                 value={editingParam.category || 'PHYSICAL'}

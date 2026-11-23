@@ -231,6 +231,7 @@ namespace Aquora.Application.Services
                     Id = p.Id,
                     Name = p.Name,
                     Category = p.Category,
+                    Frequency = p.Frequency ?? "DAILY",
                     Unit = p.Unit,
                     MinWarning = p.MinWarning,
                     MinAcceptable = p.MinAcceptable,
@@ -1236,11 +1237,13 @@ namespace Aquora.Application.Services
 
             param.Name = request.Name;
             param.Category = request.Category;
+            param.Frequency = string.IsNullOrWhiteSpace(request.Frequency) ? "DAILY" : request.Frequency.Trim().ToUpperInvariant();
             param.Unit = request.Unit;
             param.MinWarning = request.MinWarning;
             param.MinAcceptable = request.MinAcceptable;
             param.MaxAcceptable = request.MaxAcceptable;
             param.MaxWarning = request.MaxWarning;
+            param.RequiredDurationHours = request.RequiredDurationHours;
             param.IsActive = true;
             param.UpdatedAt = DateTime.UtcNow;
             param.UpdatedBy = currentUserId;
@@ -1252,11 +1255,13 @@ namespace Aquora.Application.Services
                 Id = param.Id,
                 Name = param.Name,
                 Category = param.Category,
+                Frequency = param.Frequency,
                 Unit = param.Unit,
                 MinWarning = param.MinWarning,
                 MinAcceptable = param.MinAcceptable,
                 MaxAcceptable = param.MaxAcceptable,
-                MaxWarning = param.MaxWarning
+                MaxWarning = param.MaxWarning,
+                RequiredDurationHours = param.RequiredDurationHours
             };
         }
 
@@ -1318,9 +1323,15 @@ namespace Aquora.Application.Services
         {
             var tenantId = GetTenantId();
             var settings = await _context.QCSettings.FirstOrDefaultAsync(s => s.TenantId == tenantId);
+            var platformTenant = await _platformContext.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId);
+            var defaultFssai = platformTenant?.LicenseNumber;
+
             if (settings == null)
             {
-                return new QCSettingsDto();
+                return new QCSettingsDto
+                {
+                    FssaiNumber = defaultFssai
+                };
             }
 
             return new QCSettingsDto
@@ -1331,7 +1342,10 @@ namespace Aquora.Application.Services
                 DigitalSignatureTitle = settings.DigitalSignatureTitle,
                 LabAddress = settings.LabAddress,
                 ContactEmail = settings.ContactEmail,
-                NotificationRecipients = settings.NotificationRecipients
+                NotificationRecipients = settings.NotificationRecipients,
+                FssaiNumber = !string.IsNullOrWhiteSpace(settings.FssaiNumber) ? settings.FssaiNumber : defaultFssai,
+                BisNumber = settings.BisNumber,
+                AdditionalLicensesJson = settings.AdditionalLicensesJson
             };
         }
 
@@ -1362,10 +1376,29 @@ namespace Aquora.Application.Services
             settings.LabAddress = dto.LabAddress;
             settings.ContactEmail = dto.ContactEmail;
             settings.NotificationRecipients = dto.NotificationRecipients;
+            settings.FssaiNumber = dto.FssaiNumber?.Trim();
+            settings.BisNumber = dto.BisNumber?.Trim();
+            settings.AdditionalLicensesJson = dto.AdditionalLicensesJson;
             settings.UpdatedAt = DateTime.UtcNow;
             settings.UpdatedBy = currentUserId;
 
             await _context.SaveChangesAsync();
+
+            // Synchronize FSSAI License Number with Platform Tenant details
+            try
+            {
+                var platformTenant = await _platformContext.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId);
+                if (platformTenant != null && !string.IsNullOrWhiteSpace(dto.FssaiNumber))
+                {
+                    platformTenant.LicenseNumber = dto.FssaiNumber.Trim();
+                    await _platformContext.SaveChangesAsync();
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Could not synchronize FSSAI number to platform tenant profile: {Message}", ex.Message);
+            }
+
             return dto;
         }
 

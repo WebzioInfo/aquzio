@@ -136,7 +136,7 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
     <div className={`flex flex-col gap-1.5 text-left ${className}`} ref={containerRef}>
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <label className={labelClassName || "text-xs font-semibold text-gray-700"}>
-          {label} {required && <span className="text-red-500">*</span>}
+          {label.replace(/\s*\*+\s*$/, '').trim()} {required && <span className="text-red-500">*</span>}
         </label>
         <div className="flex items-center gap-2">
           {labelRight}
@@ -144,10 +144,10 @@ export const SearchableDropdown: React.FC<SearchableDropdownProps> = ({
             <button
               type="button"
               onClick={onQuickAdd}
-              className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-0.5 hover:underline transition-colors"
+              className="text-[11px] font-bold text-blue-600 hover:text-blue-700 flex items-center gap-0.5 hover:underline transition-colors cursor-pointer"
             >
               <Plus className="w-3 h-3" />
-              <span>{quickAddLabel}</span>
+              <span>{quickAddLabel.replace(/^\s*\++\s*/, '').trim()}</span>
             </button>
           )}
         </div>

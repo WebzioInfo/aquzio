@@ -35,6 +35,7 @@ export const InviteTeamPage: React.FC = () => {
   }, [])
 
   const roles = [
+    { label: 'QC (Quality Control)', value: 'QC' },
     { label: 'Operator', value: 'Operator' },
     { label: 'Manager', value: 'Manager' },
     { label: 'Admin', value: 'Admin' },

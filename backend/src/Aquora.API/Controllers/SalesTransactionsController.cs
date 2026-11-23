@@ -29,6 +29,7 @@ namespace Aquora.API.Controllers
         private readonly IHubContext<DashboardHub> _dashboardHub;
         private readonly ILedgerService _ledgerService;
         private readonly ITenantProvider _tenantProvider;
+        private readonly IInvoicePdfService _invoicePdfService;
 
         public SalesController(
             ITenantDbContext tenantContext,
@@ -37,7 +38,8 @@ namespace Aquora.API.Controllers
             IPlatformDbContext platformContext,
             IHubContext<DashboardHub> dashboardHub,
             ILedgerService ledgerService,
-            ITenantProvider tenantProvider)
+            ITenantProvider tenantProvider,
+            IInvoicePdfService invoicePdfService)
         {
             _tenantContext = tenantContext;
             _currentUserContext = currentUserContext;
@@ -46,6 +48,7 @@ namespace Aquora.API.Controllers
             _dashboardHub = dashboardHub;
             _ledgerService = ledgerService;
             _tenantProvider = tenantProvider;
+            _invoicePdfService = invoicePdfService;
         }
 
         private async Task NotifyDashboardAsync(string eventName, object? data = null)
@@ -108,6 +111,31 @@ namespace Aquora.API.Controllers
         {
             var allowedRoles = new[] { "Owner", "CompanyOwner", "SuperAdmin", "PlatformAdmin", "CompanyAdmin", "Accountant", "Admin", "Manager", "Sales" };
             return _currentUserContext.Roles.Any(r => allowedRoles.Contains(r, StringComparer.OrdinalIgnoreCase));
+        }
+
+        private static string? ExtractMetadataField(string? metadataJson, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(metadataJson)) return null;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(metadataJson);
+                if (doc.RootElement.TryGetProperty(fieldName, out var val))
+                {
+                    return val.GetString();
+                }
+            }
+            catch {}
+            return null;
+        }
+
+        private static string EnsureInvoiceMetadata(string? existingJson, string? invoiceType, string? billType)
+        {
+            var dict = string.IsNullOrWhiteSpace(existingJson)
+                ? new Dictionary<string, object?>()
+                : (System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object?>>(existingJson) ?? new Dictionary<string, object?>());
+            if (!string.IsNullOrWhiteSpace(invoiceType)) dict["invoiceType"] = invoiceType;
+            if (!string.IsNullOrWhiteSpace(billType)) dict["billType"] = billType;
+            return System.Text.Json.JsonSerializer.Serialize(dict);
         }
 
         private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _healedSalesCustomerSchemas = new();
@@ -387,6 +415,8 @@ namespace Aquora.API.Controllers
                     ProductValue = t.ProductValue,
                     DamageCost = t.DamageCost,
                     DamageReason = t.DamageReason,
+                    InvoiceType = ExtractMetadataField(t.MetadataJson, "invoiceType") ?? (!string.IsNullOrWhiteSpace(t.Customer?.GSTNumber) || string.Equals(t.Customer?.CustomerType, "B2B", StringComparison.OrdinalIgnoreCase) ? "B2B" : "B2C"),
+                    BillType = ExtractMetadataField(t.MetadataJson, "billType") ?? (t.IsGstApplicable && (t.TaxAmount > 0 || t.GstRate > 0) ? "Tax Invoice" : "Bill of Supply"),
                     Items = itemsByTxnId.TryGetValue(t.Id, out var lines) && lines.Any()
                         ? lines.Select(li => new SalesTransactionItemDto
                         {
@@ -537,6 +567,8 @@ namespace Aquora.API.Controllers
                     ProductValue = txn.ProductValue,
                     DamageCost = txn.DamageCost,
                     DamageReason = txn.DamageReason,
+                    InvoiceType = ExtractMetadataField(txn.MetadataJson, "invoiceType") ?? (!string.IsNullOrWhiteSpace(txn.Customer?.GSTNumber) || string.Equals(txn.Customer?.CustomerType, "B2B", StringComparison.OrdinalIgnoreCase) ? "B2B" : "B2C"),
+                    BillType = ExtractMetadataField(txn.MetadataJson, "billType") ?? (txn.IsGstApplicable && (txn.TaxAmount > 0 || txn.GstRate > 0) ? "Tax Invoice" : "Bill of Supply"),
                     Items = itemDtos,
                     CreatedBy = txn.CreatedBy,
                     CreatedByName = createdByName,
@@ -549,6 +581,44 @@ namespace Aquora.API.Controllers
             catch (Exception ex)
             {
                 return Failure<SalesTransactionDto>(ex.Message, "Failed to retrieve sales transaction.");
+            }
+        }
+
+        /// <summary>
+        /// Authoritatively renders and streams an official Tax Invoice (B2B/B2C) or Bill of Supply PDF.
+        /// Includes Company Branding, Buyer details, HSN table, GST breakdown, Bank info, and amount in words.
+        /// </summary>
+        [HttpGet("{id:guid}/invoice-pdf")]
+        public async Task<IActionResult> DownloadInvoicePdf(Guid id)
+        {
+            try
+            {
+                var tenantId = _currentUserContext.TenantId;
+                var txn = await _tenantContext.SalesTransactions
+                    .Include(t => t.Customer)
+                    .Include(t => t.Product)
+                    .Include(t => t.Items)
+                        .ThenInclude(i => i.Product)
+                    .Include(t => t.Items)
+                        .ThenInclude(i => i.CaseConfiguration)
+                    .FirstOrDefaultAsync(t => t.Id == id && t.TenantId == tenantId && !t.IsDeleted);
+
+                if (txn == null)
+                {
+                    return NotFound(ApiResponse<object>.CreateFailure("Sales transaction / invoice not found.", "NOT_FOUND"));
+                }
+
+                var company = await _tenantContext.Companies.FirstOrDefaultAsync(c => c.TenantId == tenantId && !c.IsDeleted) 
+                    ?? new Company { Name = "Aquzio Purified Water Co." };
+                var tenant = await _platformContext.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId);
+
+                var pdfBytes = await _invoicePdfService.GenerateInvoicePdfAsync(txn, company, tenant, txn.Customer);
+                var safeInvoiceNo = string.IsNullOrWhiteSpace(txn.TransactionNumber) ? txn.Id.ToString()[..8].ToUpper() : txn.TransactionNumber;
+                return File(pdfBytes, "application/pdf", $"Invoice_{safeInvoiceNo}.pdf");
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, ApiResponse<object>.CreateFailure(ex.Message, "PDF_GENERATION_FAILED"));
             }
         }
 
@@ -1087,7 +1157,7 @@ namespace Aquora.API.Controllers
                     CGST = request.CGST,
                     SGST = request.SGST,
                     IGST = request.IGST,
-                    MetadataJson = request.MetadataJson,
+                    MetadataJson = EnsureInvoiceMetadata(request.MetadataJson, request.InvoiceType, request.BillType),
                     TotalAmount = totalAmount,
                     AmountReceived = amountReceived,
                     OutstandingAmount = outstandingAmount,
@@ -1695,7 +1765,7 @@ namespace Aquora.API.Controllers
                 existingTxn.CGST = request.CGST;
                 existingTxn.SGST = request.SGST;
                 existingTxn.IGST = request.IGST;
-                existingTxn.MetadataJson = request.MetadataJson;
+                existingTxn.MetadataJson = EnsureInvoiceMetadata(request.MetadataJson, request.InvoiceType, request.BillType);
                 existingTxn.TotalAmount = totalAmount;
                 existingTxn.AmountReceived = amountReceived;
                 existingTxn.OutstandingAmount = outstandingAmount;
@@ -3020,6 +3090,8 @@ namespace Aquora.API.Controllers
         public decimal SGST { get; set; }
         public decimal IGST { get; set; }
         public string? MetadataJson { get; set; }
+        public string? InvoiceType { get; set; }
+        public string? BillType { get; set; }
 
         public decimal TotalAmount { get; set; }
         public decimal AmountReceived { get; set; }
@@ -3111,6 +3183,8 @@ namespace Aquora.API.Controllers
         public decimal SGST { get; set; }
         public decimal IGST { get; set; }
         public string? MetadataJson { get; set; }
+        public string? InvoiceType { get; set; }
+        public string? BillType { get; set; }
 
         public decimal TotalAmount { get; set; }
         public decimal AmountReceived { get; set; }

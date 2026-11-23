@@ -214,6 +214,7 @@ export const UserModal: React.FC<UserModalProps> = ({
               >
                 <option value="SuperAdmin">SuperAdmin</option>
                 <option value="CompanyAdmin">CompanyAdmin</option>
+                <option value="QC">QC (Quality Control Chemist)</option>
                 <option value="Owner">Owner</option>
                 <option value="Admin">Admin</option>
                 <option value="Manager">Manager</option>

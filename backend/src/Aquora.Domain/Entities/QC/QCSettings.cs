@@ -17,6 +17,11 @@ namespace Aquora.Domain.Entities.QC
         public string ContactEmail { get; set; } = string.Empty;
         public string NotificationRecipients { get; set; } = string.Empty; // Comma separated emails/users
 
+        // Regulatory & Plant Licenses
+        public string? FssaiNumber { get; set; }
+        public string? BisNumber { get; set; }
+        public string? AdditionalLicensesJson { get; set; } // JSON array of custom licenses [{ "name": "...", "number": "..." }]
+
         // Auditable fields
         public DateTime CreatedAt { get; set; }
         public string CreatedBy { get; set; } = string.Empty;
