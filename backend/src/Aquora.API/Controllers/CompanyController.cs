@@ -90,13 +90,19 @@ namespace Aquora.API.Controllers
 
         private async Task<Company> GetOrCreateCompanyAsync(Guid tenantId)
         {
-            var company = await _tenantContext.Companies.FirstOrDefaultAsync(c => !c.IsDeleted);
+            var company = tenantId != Guid.Empty
+                ? await _tenantContext.Companies.FirstOrDefaultAsync(c => c.TenantId == tenantId && !c.IsDeleted)
+                : await _tenantContext.Companies.FirstOrDefaultAsync(c => !c.IsDeleted);
+
             if (company != null)
             {
                 return company;
             }
 
-            company = await _tenantContext.Companies.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId);
+            company = tenantId != Guid.Empty
+                ? await _tenantContext.Companies.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.TenantId == tenantId)
+                : null;
+
             if (company != null)
             {
                 company.IsDeleted = false;
@@ -145,9 +151,11 @@ namespace Aquora.API.Controllers
                     try { await _platformContext.SaveChangesAsync(); } catch { }
                 }
 
-                var resolvedName = !string.IsNullOrWhiteSpace(company.Name) && company.Name != "Company"
-                    ? company.Name
-                    : (tenant?.Name ?? "Aquora Water ERP");
+                var resolvedName = !string.IsNullOrWhiteSpace(tenant?.Name)
+                    ? tenant.Name
+                    : (!string.IsNullOrWhiteSpace(company.Name) && company.Name != "Company"
+                        ? company.Name
+                        : "Aiwa Minerals");
 
                 var currencyCode = !string.IsNullOrWhiteSpace(tenant?.Currency) && !tenant.Currency.Equals("USD", StringComparison.OrdinalIgnoreCase)
                     ? tenant.Currency
