@@ -9,7 +9,8 @@ import {
   FlaskConical,
   Activity,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
+  Filter
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from '../../../utils/toast';
@@ -22,6 +23,8 @@ import { EnterpriseSelect } from '../../../components/ui/EnterpriseSelect';
 import { EnterpriseButton } from '../../../components/ui/EnterpriseButton';
 import { EnterpriseBadge } from '../../../components/ui/EnterpriseBadge';
 import { EnterpriseLoading } from '../../../components/ui/EnterpriseLoading';
+import { BatchNumberSuggestion } from '../../../components/batch/BatchNumberSuggestion';
+import { api } from '../../../services/api';
 
 import {
   waterTestApi,
@@ -86,9 +89,11 @@ export const WaterTestReportFormPage: React.FC = () => {
   const [reportNumber, setReportNumber] = useState('');
 
   // Form Fields
+  const [badgeLetters, setBadgeLetters] = useState('');
   const [batchNumber, setBatchNumber] = useState('');
   const [sampleNumber, setSampleNumber] = useState('');
   const [reportType, setReportType] = useState('DAILY');
+  const [showAllParameters, setShowAllParameters] = useState(false);
   const [productionDate, setProductionDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [sampleTime, setSampleTime] = useState(format(new Date(), "yyyy-MM-dd'T'HH:mm"));
   const [testedBy, setTestedBy] = useState('');
@@ -108,6 +113,18 @@ export const WaterTestReportFormPage: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
+      try {
+        const cached = localStorage.getItem('aquzio_company_profile');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed.badgeLetters) setBadgeLetters(parsed.badgeLetters.toUpperCase());
+        }
+        const settingsRes = await api.get('/api/v1/company/settings');
+        if (settingsRes.data?.data?.badgeLetters) {
+          setBadgeLetters(settingsRes.data.data.badgeLetters.toUpperCase());
+        }
+      } catch {}
+
       const paramsRes = await waterTestApi.getParameters();
       setParameters(paramsRes.data);
 
@@ -189,9 +206,34 @@ export const WaterTestReportFormPage: React.FC = () => {
     updateParamResult(param, { [field]: val });
   };
 
+  // Check if a parameter is included based on the selected report type
+  const isParamAllowedByReportType = (param: WaterTestParameter) => {
+    if (showAllParameters) return true;
+
+    // Always keep if an existing value has already been recorded/entered
+    const res = getParamResult(param);
+    const hasValue = Boolean(
+      (res?.value && res.value.trim() !== '') ||
+      (res?.stringValue && res.stringValue.trim() !== '')
+    );
+    if (hasValue) return true;
+
+    const freq = (param.frequency || 'DAILY').toUpperCase();
+    if (reportType === 'DAILY') {
+      return freq === 'DAILY';
+    }
+    if (reportType === 'WEEKLY') {
+      return freq === 'DAILY' || freq === 'WEEKLY';
+    }
+    // MONTHLY or EXTERNAL_LAB includes all
+    return true;
+  };
+
   // Group and sort Physical & Chemical parameters from database
   const physicalChemicalParams = useMemo(() => {
-    const filtered = parameters.filter(p => p.category === 'PHYSICAL' || p.category === 'CHEMICAL');
+    const filtered = parameters
+      .filter(p => p.category === 'PHYSICAL' || p.category === 'CHEMICAL')
+      .filter(isParamAllowedByReportType);
     const uniqueMap = new Map<string, WaterTestParameter>();
     filtered.forEach(p => {
       const key = p.name.toLowerCase().trim();
@@ -206,11 +248,13 @@ export const WaterTestReportFormPage: React.FC = () => {
       if (idxB !== -1) return 1;
       return a.name.localeCompare(b.name);
     });
-  }, [parameters]);
+  }, [parameters, reportType, showAllParameters, results]);
 
   // Group and sort Microbiology parameters from database
   const microParams = useMemo(() => {
-    const filtered = parameters.filter(p => p.category === 'MICROBIOLOGY');
+    const filtered = parameters
+      .filter(p => p.category === 'MICROBIOLOGY')
+      .filter(isParamAllowedByReportType);
     const uniqueMap = new Map<string, WaterTestParameter>();
     filtered.forEach(p => {
       const key = p.name.toLowerCase().trim();
@@ -225,7 +269,7 @@ export const WaterTestReportFormPage: React.FC = () => {
       if (idxB !== -1) return 1;
       return a.name.localeCompare(b.name);
     });
-  }, [parameters]);
+  }, [parameters, reportType, showAllParameters, results]);
 
   const evaluateParamStatus = (param: WaterTestParameter): 'PASS' | 'FAIL' | 'WARNING' | 'NOT_ENTERED' => {
     const res = getParamResult(param);
@@ -245,7 +289,7 @@ export const WaterTestReportFormPage: React.FC = () => {
     isSavingRef.current = true;
     setIsSaving(true);
     try {
-      const allFormParameters = [...physicalChemicalParams, ...microParams];
+      const allFormParameters = parameters.length > 0 ? parameters : [...physicalChemicalParams, ...microParams];
       const deduplicatedPayloadMap = new Map<string, { id?: string; parameterId: string; value: number | null; stringValue: string | null }>();
 
       allFormParameters.forEach(param => {
@@ -433,12 +477,19 @@ export const WaterTestReportFormPage: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <EnterpriseInput
-            label="Batch Number *"
-            placeholder="e.g. BATCH-2026-0805"
-            value={batchNumber}
-            onChange={(e) => setBatchNumber(e.target.value)}
-          />
+          <div className="flex flex-col">
+            <EnterpriseInput
+              label="Batch Number *"
+              placeholder={badgeLetters ? `e.g. ${badgeLetters}-${format(new Date(), 'yyyy-MM')}-001` : "e.g. BATCH-2026-0805"}
+              value={batchNumber}
+              onChange={(e) => setBatchNumber(e.target.value)}
+            />
+            <BatchNumberSuggestion
+              value={batchNumber}
+              badgeLetters={badgeLetters}
+              onApplyPrefix={(newVal) => setBatchNumber(newVal)}
+            />
+          </div>
 
           <EnterpriseInput
             label="Sample Number"
@@ -497,6 +548,34 @@ export const WaterTestReportFormPage: React.FC = () => {
           />
         </div>
       </EnterpriseCard>
+
+      {/* Parameter Filter Bar & Indicator */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+        <div className="flex items-center gap-2.5">
+          <Filter className="w-4 h-4 text-blue-600" />
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-slate-700">
+              {showAllParameters
+                ? `Showing All Parameters (${physicalChemicalParams.length + microParams.length}/${parameters.length})`
+                : `Filtered by ${reportType === 'DAILY' ? 'Daily Water Test' : reportType === 'WEEKLY' ? 'Weekly Comprehensive' : reportType === 'MONTHLY' ? 'Monthly Verification' : 'External NABL Lab Test'} (${physicalChemicalParams.length + microParams.length}/${parameters.length} active)`}
+            </span>
+            {!showAllParameters && (
+              <EnterpriseBadge variant="info">
+                {reportType}
+              </EnterpriseBadge>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+          <button
+            type="button"
+            onClick={() => setShowAllParameters(!showAllParameters)}
+            className="text-xs font-semibold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded-lg border border-blue-200 transition-colors cursor-pointer"
+          >
+            {showAllParameters ? 'Filter by Report Type' : 'Show All Parameters'}
+          </button>
+        </div>
+      </div>
 
       {/* 2. Physical & Chemical Parameters Section */}
       <EnterpriseCard className="p-6 space-y-4 bg-white border border-slate-200">

@@ -46,6 +46,7 @@ export const QCLayout: React.FC = () => {
             localStorage.setItem('aquzio_company_profile', JSON.stringify({
               name: data.name,
               displayName: data.displayName || data.name,
+              badgeLetters: data.badgeLetters,
               email: data.email,
               phone: data.phone,
               gstNumber: data.gstNumber,

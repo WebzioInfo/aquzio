@@ -78,6 +78,7 @@ namespace Aquora.Tests
             var mockDashboardHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Aquora.API.Hubs.DashboardHub>>();
             var mockLedgerService = new Mock<ILedgerService>();
             var mockTenantProvider = new Mock<ITenantProvider>();
+            var mockInvoicePdfService = new Mock<IInvoicePdfService>();
 
             var controller = new SalesController(
                 context,
@@ -86,7 +87,8 @@ namespace Aquora.Tests
                 mockPlatformContext.Object,
                 mockDashboardHub.Object,
                 mockLedgerService.Object,
-                mockTenantProvider.Object
+                mockTenantProvider.Object,
+                mockInvoicePdfService.Object
             );
             controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
@@ -154,6 +156,7 @@ namespace Aquora.Tests
             var mockDashboardHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Aquora.API.Hubs.DashboardHub>>();
             var mockLedgerService = new Mock<ILedgerService>();
             var mockTenantProvider = new Mock<ITenantProvider>();
+            var mockInvoicePdfService = new Mock<IInvoicePdfService>();
 
             var controller = new SalesController(
                 context,
@@ -162,7 +165,8 @@ namespace Aquora.Tests
                 mockPlatformContext.Object,
                 mockDashboardHub.Object,
                 mockLedgerService.Object,
-                mockTenantProvider.Object
+                mockTenantProvider.Object,
+                mockInvoicePdfService.Object
             );
             controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
@@ -468,6 +472,7 @@ namespace Aquora.Tests
             var mockDashboardHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Aquora.API.Hubs.DashboardHub>>();
             var mockLedgerService = new Mock<ILedgerService>();
             var mockTenantProvider = new Mock<ITenantProvider>();
+            var mockInvoicePdfService = new Mock<IInvoicePdfService>();
 
             var controller = new SalesController(
                 context,
@@ -476,7 +481,8 @@ namespace Aquora.Tests
                 mockPlatformContext.Object,
                 mockDashboardHub.Object,
                 mockLedgerService.Object,
-                mockTenantProvider.Object
+                mockTenantProvider.Object,
+                mockInvoicePdfService.Object
             );
             controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 
@@ -558,6 +564,7 @@ namespace Aquora.Tests
             var mockDashboardHub = new Mock<Microsoft.AspNetCore.SignalR.IHubContext<Aquora.API.Hubs.DashboardHub>>();
             var mockLedgerService = new Mock<ILedgerService>();
             var mockTenantProvider = new Mock<ITenantProvider>();
+            var mockInvoicePdfService = new Mock<IInvoicePdfService>();
 
             var controller = new SalesController(
                 context,
@@ -566,7 +573,8 @@ namespace Aquora.Tests
                 mockPlatformContext.Object,
                 mockDashboardHub.Object,
                 mockLedgerService.Object,
-                mockTenantProvider.Object
+                mockTenantProvider.Object,
+                mockInvoicePdfService.Object
             );
             controller.ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() };
 

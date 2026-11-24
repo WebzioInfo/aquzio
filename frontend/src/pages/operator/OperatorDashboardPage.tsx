@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import EnterpriseCard from '../../components/ui/EnterpriseCard'
 import EnterpriseButton from '../../components/ui/EnterpriseButton'
+import { BatchNumberSuggestion } from '../../components/batch/BatchNumberSuggestion'
 import { getLineTheme } from '../../utils/lineTheme'
 import { RAW_MATERIAL_CATEGORIES } from '../../utils/rawMaterialCategories'
 import { formatRawMaterialUsage, formatRawMaterialWastage } from '../../utils/rawMaterialFormatting'
@@ -264,6 +265,14 @@ export const OperatorDashboardPage: React.FC = () => {
   // --- START PRODUCTION MODAL FIELDS ---
   const [modalShift, setModalShift] = useState(selectedShift || '')
   const [modalBatchNo, setModalBatchNo] = useState('')
+  const companyBadgeLetters = useMemo(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem('aquzio_company_profile') || '{}')
+      return (p.badgeLetters || '').toUpperCase()
+    } catch {
+      return ''
+    }
+  }, [])
   const [modalSkuSearch, setModalSkuSearch] = useState('')
   const [modalSelectedSku, setModalSelectedSku] = useState<SkuProduct | null>(null)
   const [modalSkuOpen, setModalSkuOpen] = useState(false)
@@ -1804,6 +1813,11 @@ export const OperatorDashboardPage: React.FC = () => {
                         }
                       }}
                       className="w-full h-10 border border-[#D0D5DD] px-3 py-1.5 text-xs rounded-[8px] focus:outline-none focus-line-theme font-semibold bg-white text-slate-900"
+                    />
+                    <BatchNumberSuggestion
+                      value={modalBatchNo}
+                      badgeLetters={companyBadgeLetters}
+                      onApplyPrefix={setModalBatchNo}
                     />
                     {modalErrors.batchNumber && (
                       <span className="text-[10px] font-bold text-red-500 flex items-center gap-1 mt-0.5">

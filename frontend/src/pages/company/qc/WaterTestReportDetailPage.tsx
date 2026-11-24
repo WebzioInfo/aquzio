@@ -88,8 +88,8 @@ export const WaterTestReportDetailPage: React.FC = () => {
   }, []);
 
   const companyInfo = useMemo(() => ({
-    name: companyProfile?.name || user?.companyName || user?.tenantName || 'AQUZIO ENTERPRISE',
-    displayName: companyProfile?.displayName || user?.companyName || user?.tenantName || 'AQUZIO ENTERPRISE',
+    name: companyProfile?.name || user?.companyName || user?.tenantName || 'Aiwa Minerals',
+    displayName: companyProfile?.displayName || user?.companyName || user?.tenantName || 'Aiwa Minerals',
     address: companyProfile?.address,
     city: companyProfile?.city,
     state: companyProfile?.state,

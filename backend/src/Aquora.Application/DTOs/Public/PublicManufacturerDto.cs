@@ -23,6 +23,9 @@ namespace Aquora.Application.DTOs.Public
         [JsonPropertyName("logoUrl")]
         public string? LogoUrl { get; set; }
 
+        [JsonPropertyName("badgeLetters")]
+        public string? BadgeLetters { get; set; }
+
         [JsonPropertyName("address")]
         public string? Address { get; set; }
 

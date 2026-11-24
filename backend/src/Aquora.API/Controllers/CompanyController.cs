@@ -157,6 +157,7 @@ namespace Aquora.API.Controllers
                 {
                     Name = resolvedName,
                     DisplayName = resolvedName,
+                    BadgeLetters = tenant?.BadgeLetters ?? string.Empty,
                     Email = tenant?.OwnerEmail ?? string.Empty,
                     Phone = tenant?.OwnerPhone ?? string.Empty,
                     GstNumber = tenant?.GstNumber ?? string.Empty,
@@ -300,6 +301,11 @@ namespace Aquora.API.Controllers
             if (tenant != null)
             {
                 tenant.Name = request.Name;
+                if (request.BadgeLetters != null)
+                {
+                    var cleaned = new string(request.BadgeLetters.Where(char.IsLetterOrDigit).Take(4).ToArray()).ToUpperInvariant();
+                    tenant.BadgeLetters = string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
+                }
                 tenant.OwnerEmail = request.Email;
                 tenant.OwnerPhone = request.Phone;
                 tenant.GstNumber = request.GstNumber;
@@ -535,6 +541,7 @@ namespace Aquora.API.Controllers
     {
         public string Name { get; set; } = string.Empty;
         public string? DisplayName { get; set; }
+        public string? BadgeLetters { get; set; }
         public string? Email { get; set; }
         public string? Phone { get; set; }
         public string? GstNumber { get; set; }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 using Aquora.Domain.Common;
 
 namespace Aquora.Domain.Entities
@@ -13,6 +14,9 @@ namespace Aquora.Domain.Entities
         public string? CustomDomain { get; set; }
         public bool IsActive { get; set; } = true;
         public bool IsBiodropsProduction { get; set; } = false;
+
+        [MaxLength(4)]
+        public string? BadgeLetters { get; set; }
 
         // Enterprise Company Details
         public string? OwnerName { get; set; }

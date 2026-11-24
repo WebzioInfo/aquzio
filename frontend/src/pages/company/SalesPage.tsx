@@ -1192,9 +1192,9 @@ export const SalesPage: React.FC<{ canWrite: boolean; showToast: (msg: string, t
 
   // PDF Exporter
   const handleDownloadPDF = (txn: SalesTransaction) => {
-    const compName = companySettings?.displayName || companySettings?.name || user?.companyName || 'Corporate Enterprise Tenant'
-    const compGst = companySettings?.gstNumber || '36AAACU9876D1Z5'
-    const compAddr = companySettings?.address || 'Industrial Park, Hyderabad'
+    const compName = companySettings?.displayName || companySettings?.name || user?.companyName || 'Aiwa Minerals'
+    const compGst = companySettings?.gstNumber || '29AABCA1234F1Z8'
+    const compAddr = companySettings?.address || 'Hoodi, KR puram, bengaluru, india'
 
     const total = txn.totalAmount || (txn.cases * (txn.unitPrice || 0))
     const tax = txn.taxAmount || 0

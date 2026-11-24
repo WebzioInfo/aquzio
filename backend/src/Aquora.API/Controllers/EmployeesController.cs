@@ -355,15 +355,16 @@ namespace Aquora.API.Controllers
                     }
                 }
 
-                // Wrap in a transaction scope to ensure atomicity across both DbContexts
-                using (var scope = new System.Transactions.TransactionScope(
-                    System.Transactions.TransactionScopeOption.Required,
-                    new System.Transactions.TransactionOptions { IsolationLevel = System.Transactions.IsolationLevel.ReadCommitted },
-                    System.Transactions.TransactionScopeAsyncFlowOption.Enabled))
+                await _platformContext.SaveChangesAsync();
+                try
                 {
-                    await _platformContext.SaveChangesAsync();
                     await _tenantContext.SaveChangesAsync();
-                    scope.Complete();
+                }
+                catch
+                {
+                    _platformContext.Users.Remove(newUser);
+                    await _platformContext.SaveChangesAsync();
+                    throw;
                 }
 
                 // Non-blocking Platform Audit Trail logging
@@ -689,15 +690,8 @@ namespace Aquora.API.Controllers
                     }
                 }
 
-                using (var scope = new System.Transactions.TransactionScope(
-                    System.Transactions.TransactionScopeOption.Required,
-                    new System.Transactions.TransactionOptions { IsolationLevel = System.Transactions.IsolationLevel.ReadCommitted },
-                    System.Transactions.TransactionScopeAsyncFlowOption.Enabled))
-                {
-                    await _platformContext.SaveChangesAsync();
-                    await _tenantContext.SaveChangesAsync();
-                    scope.Complete();
-                }
+                await _platformContext.SaveChangesAsync();
+                await _tenantContext.SaveChangesAsync();
 
                 // Non-blocking Platform Audit Trail logging
                 try
@@ -825,15 +819,8 @@ namespace Aquora.API.Controllers
                     }
                 }
 
-                using (var scope = new System.Transactions.TransactionScope(
-                    System.Transactions.TransactionScopeOption.Required,
-                    new System.Transactions.TransactionOptions { IsolationLevel = System.Transactions.IsolationLevel.ReadCommitted },
-                    System.Transactions.TransactionScopeAsyncFlowOption.Enabled))
-                {
-                    await _platformContext.SaveChangesAsync();
-                    await _tenantContext.SaveChangesAsync();
-                    scope.Complete();
-                }
+                await _platformContext.SaveChangesAsync();
+                await _tenantContext.SaveChangesAsync();
 
                 // Non-blocking Platform Audit Trail logging
                 try

@@ -17,6 +17,7 @@ export const CompanyProfileForm: React.FC = () => {
   // Editable fields state
   const [name, setName] = useState('')
   const [displayName, setDisplayName] = useState('')
+  const [badgeLetters, setBadgeLetters] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [gstNumber, setGstNumber] = useState('')
@@ -38,6 +39,7 @@ export const CompanyProfileForm: React.FC = () => {
         setProfile(data)
         setName(data.name || '')
         setDisplayName(data.displayName || '')
+        setBadgeLetters(data.badgeLetters || '')
         setEmail(data.email || '')
         setPhone(data.phone || '')
         setGstNumber(data.gstNumber || '')
@@ -61,6 +63,7 @@ export const CompanyProfileForm: React.FC = () => {
           localStorage.setItem('aquzio_company_profile', JSON.stringify({
             name: data.name,
             displayName: data.displayName || data.name,
+            badgeLetters: data.badgeLetters,
             email: data.email,
             phone: data.phone,
             gstNumber: data.gstNumber,
@@ -136,6 +139,7 @@ export const CompanyProfileForm: React.FC = () => {
       const res = await api.put('/api/v1/company/settings', {
         name,
         displayName,
+        badgeLetters: badgeLetters.trim().toUpperCase(),
         email,
         phone,
         gstNumber,
@@ -175,6 +179,10 @@ export const CompanyProfileForm: React.FC = () => {
             <div className="relative w-24 h-24 mx-auto mb-4 bg-slate-100 rounded-2xl border border-slate-200 flex items-center justify-center overflow-hidden group shadow-2xs">
               {logoUrl ? (
                 <img src={logoUrl} alt="Company Logo" className="w-full h-full object-contain p-1" />
+              ) : badgeLetters ? (
+                <div className="w-full h-full flex items-center justify-center bg-teal-50 text-teal-700 font-bold text-2xl tracking-wider">
+                  {badgeLetters.trim().slice(0, 3).toUpperCase()}
+                </div>
               ) : (
                 <Building2 className="w-12 h-12 text-slate-400" />
               )}
@@ -299,6 +307,37 @@ export const CompanyProfileForm: React.FC = () => {
                   className="w-full text-sm border-slate-200 focus:border-blue-500 focus:ring-blue-500 rounded-lg p-2.5 border"
                   placeholder="e.g. Aquzio"
                 />
+              </div>
+
+              {/* Brand Badge Initials / Acronym */}
+              <div className="md:col-span-2 p-3.5 bg-slate-50/80 rounded-xl border border-slate-200">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex-1">
+                    <label className="block text-xs font-semibold text-slate-800 mb-0.5">
+                      Brand Badge Initials / Acronym
+                    </label>
+                    <p className="text-[11px] text-slate-500 mb-2">
+                      2-3 character initials displayed on your public verified partner badge (e.g., BioDrops partner cards and profiles).
+                    </p>
+                    <input
+                      type="text"
+                      maxLength={4}
+                      value={badgeLetters}
+                      onChange={(e) => setBadgeLetters(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                      className="w-full sm:w-48 text-sm font-bold tracking-wider uppercase border-slate-200 focus:border-blue-500 focus:ring-blue-500 rounded-lg p-2.5 border bg-white"
+                      placeholder="e.g. AM"
+                    />
+                  </div>
+                  <div className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-lg border border-slate-200 shadow-2xs self-start sm:self-center">
+                    <div className="text-right">
+                      <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Partner Badge</span>
+                      <span className="text-[11px] text-slate-600 font-medium">Live Preview</span>
+                    </div>
+                    <div className="w-11 h-11 rounded-full bg-teal-50 text-teal-700 border-2 border-teal-200/80 flex items-center justify-center font-bold text-sm tracking-wider shadow-inner">
+                      {badgeLetters ? badgeLetters.slice(0, 3).toUpperCase() : (displayName || name || 'CO').slice(0, 2).toUpperCase()}
+                    </div>
+                  </div>
+                </div>
               </div>
               <div className="md:col-span-2">
                 <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">

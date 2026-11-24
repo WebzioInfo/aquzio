@@ -59,6 +59,10 @@ namespace Aquora.Persistence.Context
                 .IsUnique();
 
             modelBuilder.Entity<Tenant>()
+                .Property(t => t.BadgeLetters)
+                .HasMaxLength(4);
+
+            modelBuilder.Entity<Tenant>()
                 .HasIndex(t => t.Subdomain)
                 .IsUnique();
 

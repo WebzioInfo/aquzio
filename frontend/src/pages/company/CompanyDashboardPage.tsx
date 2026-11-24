@@ -39,6 +39,7 @@ import { CustomersPage } from './CustomersPage'
 import { SalesPage } from './SalesPage'
 import { useStationConfig } from '../../hooks/useStationConfig'
 import { ProductionBatchesView } from '../../components/batch'
+import { BatchNumberSuggestion } from '../../components/batch/BatchNumberSuggestion'
 
 // --- SVG BUSINESS CHARTS FOR ENTERPRISE DASHBOARD ---
 
@@ -1036,6 +1037,14 @@ export const CompanyDashboardPage: React.FC = () => {
   const [isStartBatchModalOpen, setIsStartBatchModalOpen] = useState(false)
   const [startBatchLineId, setStartBatchLineId] = useState('')
   const [startBatchNumber, setStartBatchNumber] = useState('')
+  const companyBadgeLetters = React.useMemo(() => {
+    try {
+      const p = JSON.parse(localStorage.getItem('aquzio_company_profile') || '{}')
+      return (p.badgeLetters || '').toUpperCase()
+    } catch {
+      return ''
+    }
+  }, [])
   const [startBatchProduct, setStartBatchProduct] = useState('')
   const [startBatchShift, setStartBatchShift] = useState('')
   const [startBatchTargetQty, setStartBatchTargetQty] = useState<string | number>('')
@@ -2864,6 +2873,11 @@ export const CompanyDashboardPage: React.FC = () => {
                         required
                         className="w-full h-11 px-3 border border-gray-200 rounded-[10px] text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:border-[#12A89A] focus:ring-4 focus:ring-[#12A89A]/20 transition-all"
                       />
+                      <BatchNumberSuggestion
+                        value={startBatchNumber}
+                        badgeLetters={companyBadgeLetters}
+                        onApplyPrefix={setStartBatchNumber}
+                      />
                     </div>
 
                     {/* Row 2 */}
@@ -3150,6 +3164,11 @@ export const CompanyDashboardPage: React.FC = () => {
                       onChange={e => setStartBatchNumber(e.target.value)}
                       required
                       className="w-full h-11 px-3 border border-gray-200 rounded-[10px] text-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:border-[#12A89A] focus:ring-4 focus:ring-[#12A89A]/20 transition-all"
+                    />
+                    <BatchNumberSuggestion
+                      value={startBatchNumber}
+                      badgeLetters={companyBadgeLetters}
+                      onApplyPrefix={setStartBatchNumber}
                     />
                   </div>
 

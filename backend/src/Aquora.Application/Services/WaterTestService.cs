@@ -86,6 +86,7 @@ namespace Aquora.Application.Services
                     ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""MinAcceptable"" double precision NULL;
                     ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""MaxAcceptable"" double precision NULL;
                     ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""RequiredDurationHours"" integer NOT NULL DEFAULT 0;
+                    ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""Frequency"" text NOT NULL DEFAULT 'DAILY';
                     ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""CreatedByIP"" text NULL;
                     ALTER TABLE ""{schema}"".""WaterTestParameters"" ADD COLUMN IF NOT EXISTS ""UpdatedByIP"" text NULL;
 
@@ -156,6 +157,10 @@ namespace Aquora.Application.Services
                     ALTER TABLE ""{schema}"".""WaterTestResults"" ADD COLUMN IF NOT EXISTS ""ActualCompletedAt"" timestamp with time zone NULL;
                     ALTER TABLE ""{schema}"".""WaterTestResults"" ADD COLUMN IF NOT EXISTS ""ResultStatus"" text NOT NULL DEFAULT 'COMPLETED';
                     UPDATE ""{schema}"".""WaterTestResults"" SET ""ResultStatus"" = 'COMPLETED' WHERE ""ResultStatus"" IS NULL OR ""ResultStatus"" = '';
+
+                    ALTER TABLE ""{schema}"".""QCSettings"" ADD COLUMN IF NOT EXISTS ""AdditionalLicensesJson"" text NULL;
+                    ALTER TABLE ""{schema}"".""QCSettings"" ADD COLUMN IF NOT EXISTS ""FssaiNumber"" text NULL;
+                    ALTER TABLE ""{schema}"".""QCSettings"" ADD COLUMN IF NOT EXISTS ""BisNumber"" text NULL;
                 ";
 
                 if (_context is DbContext dbContext)

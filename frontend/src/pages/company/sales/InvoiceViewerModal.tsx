@@ -82,11 +82,11 @@ export const InvoiceViewerModal: React.FC<InvoiceViewerModalProps> = ({
   const received = transaction.amountReceived ?? 0
   const balance = Math.max(0, total - received)
 
-  const compName = companySettings?.displayName || companySettings?.name || user?.companyName || 'AQUZIO PURIFIED WATER CO.'
-  const compAddr = companySettings?.address || 'Industrial Development Area, Kerala, India - 682022'
-  const compGst = companySettings?.gstNumber || '32AABCA1234F1Z8'
+  const compName = companySettings?.displayName || companySettings?.name || user?.companyName || 'Aiwa Minerals'
+  const compAddr = companySettings?.address || 'Hoodi, KR puram, bengaluru, india'
+  const compGst = companySettings?.gstNumber || '29AABCA1234F1Z8'
   const compPhone = companySettings?.phone || '+91 98470 12345'
-  const compEmail = companySettings?.email || user?.email || 'sales@aquzio.com'
+  const compEmail = companySettings?.email || user?.email || 'contact@aiwaminerals.com'
 
   const buyerName = transaction.customerName || 'Retail Customer / Counter Sale'
   const buyerGst = meta.gstin || meta.gstNumber || (invoiceType === 'B2B' ? '32AAACB9999P1Z2' : '')

@@ -512,6 +512,7 @@ namespace Aquora.Application.Services
                         Subdomain = platformTenant.Subdomain,
                         CustomDomain = platformTenant.CustomDomain,
                         LogoUrl = platformTenant.LogoUrl,
+                        BadgeLetters = !string.IsNullOrWhiteSpace(platformTenant.BadgeLetters) ? platformTenant.BadgeLetters.Trim().ToUpper() : null,
                         Address = companyAddress,
                         Location = companyAddress ?? "India",
                         LicenseNumber = fssaiVal,
