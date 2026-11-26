@@ -95,6 +95,7 @@ export interface EnterSingleResultRequest {
     testedBy?: string | null;
     remarks?: string | null;
     startedAt?: string | null;
+    concurrencyToken?: string | null;
 }
 
 export interface QCPendingTask {

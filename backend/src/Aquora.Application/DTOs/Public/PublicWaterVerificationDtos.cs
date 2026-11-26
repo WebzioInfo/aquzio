@@ -55,6 +55,26 @@ namespace Aquora.Application.DTOs.Public
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? ReportType { get; set; }
 
+        [JsonPropertyName("status")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? Status { get; set; }
+
+        [JsonPropertyName("completionStatus")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? CompletionStatus { get; set; }
+
+        [JsonPropertyName("totalParametersCount")]
+        public int TotalParametersCount { get; set; }
+
+        [JsonPropertyName("completedParametersCount")]
+        public int CompletedParametersCount { get; set; }
+
+        [JsonPropertyName("pendingParametersCount")]
+        public int PendingParametersCount { get; set; }
+
+        [JsonPropertyName("overdueParametersCount")]
+        public int OverdueParametersCount { get; set; }
+
         [JsonPropertyName("sampleTime")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public string? SampleTime { get; set; }
@@ -115,6 +135,28 @@ namespace Aquora.Application.DTOs.Public
 
         [JsonPropertyName("qualityStatus")]
         public string? QualityStatus { get; set; }
+
+        [JsonPropertyName("resultStatus")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ResultStatus { get; set; }
+
+        [JsonPropertyName("requiredDurationHours")]
+        public int RequiredDurationHours { get; set; }
+
+        [JsonPropertyName("startedAt")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? StartedAt { get; set; }
+
+        [JsonPropertyName("expectedCompletionAt")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? ExpectedCompletionAt { get; set; }
+
+        [JsonPropertyName("actualCompletedAt")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public DateTime? ActualCompletedAt { get; set; }
+
+        [JsonPropertyName("isOverdue")]
+        public bool IsOverdue { get; set; }
     }
 
     public class PublicManufacturingDto

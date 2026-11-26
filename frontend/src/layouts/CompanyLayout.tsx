@@ -10,7 +10,8 @@ import { setCompanyPrefs } from '../utils/dateFormatter'
 import {
   LayoutDashboard, Factory, Package, TrendingUp, Users, Truck,
   Settings, ChevronRight, Play, Plus, X, Layers, Workflow, CalendarClock, Sliders,
-  Droplet, Droplets, Boxes, ShoppingCart, PieChart, IdCard, Beaker, Database, AlertTriangle, BarChart3
+  Droplet, Droplets, Boxes, ShoppingCart, PieChart, IdCard, Beaker, Database, AlertTriangle, BarChart3,
+  Building2, Image as ImageIcon
 } from 'lucide-react'
 import EnterpriseSidebar from '../components/ui/EnterpriseSidebar'
 import EnterpriseTopbar from '../components/ui/EnterpriseTopbar'
@@ -220,6 +221,8 @@ export const CompanyLayout: React.FC = () => {
       badge: unreadCount > 0 ? (unreadCount > 99 ? '99+' : unreadCount) : undefined,
       pulseBadge: unreadCount > 0
     },
+    { label: 'Company Profile', path: '/company/company-profile', icon: <Building2 className="w-5 h-5" /> },
+    { label: 'Image Gallery', path: '/company/gallery', icon: <ImageIcon className="w-5 h-5" /> },
     { label: 'Company Settings', path: '/company/settings', icon: <Settings className="w-5 h-5" /> },
     { label: 'Backup & Restore', path: '/company/backups', icon: <Database className="w-5 h-5" /> },
   ]

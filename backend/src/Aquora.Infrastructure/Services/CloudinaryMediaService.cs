@@ -141,6 +141,16 @@ namespace Aquora.Infrastructure.Services
                         .Width(800).Height(800).Crop("limit").Quality("auto").FetchFormat("auto");
                     break;
 
+                case MediaAssetType.CompanyCover:
+                    uploadParams.Transformation = new Transformation()
+                        .Width(1920).Height(1080).Crop("limit").Quality("auto").FetchFormat("auto");
+                    break;
+
+                case MediaAssetType.CompanyGallery:
+                    uploadParams.Transformation = new Transformation()
+                        .Width(1600).Height(1200).Crop("limit").Quality("auto").FetchFormat("auto");
+                    break;
+
                 case MediaAssetType.QcSignature:
                     uploadParams.Transformation = new Transformation()
                         .Width(600).Height(300).Crop("limit").Quality("auto").FetchFormat("auto");
@@ -307,6 +317,8 @@ namespace Aquora.Infrastructure.Services
             {
                 MediaAssetType.UserProfilePhoto => $"aquzio/{tenantSegment}/users/{userSegment}/profile",
                 MediaAssetType.CompanyLogo => $"aquzio/{tenantSegment}/company/logo",
+                MediaAssetType.CompanyCover => $"aquzio/{tenantSegment}/company/cover",
+                MediaAssetType.CompanyGallery => $"aquzio/{tenantSegment}/company/gallery",
                 MediaAssetType.QcSignature => $"aquzio/{tenantSegment}/qc/{userSegment}/signature",
                 MediaAssetType.QcProfilePhoto => $"aquzio/{tenantSegment}/qc/{userSegment}/profile",
                 MediaAssetType.Document => $"aquzio/{tenantSegment}/documents",

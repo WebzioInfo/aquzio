@@ -427,19 +427,18 @@ namespace Aquora.Application.Services
             }
 
             var now = DateTime.UtcNow;
+            var addedParamIds = new HashSet<Guid>();
 
-            foreach (var rReq in request.Results)
+            void AddResultRow(WaterTestParameter param, double? val, string? strVal, DateTime? reqStartedAt, DateTime? reqExpectedAt, DateTime? reqCompletedAt)
             {
-                if (string.IsNullOrWhiteSpace(rReq.ParameterId)) continue;
+                if (!addedParamIds.Add(param.Id)) return;
 
-                var param = ResolveOrCreateParameter(rReq.ParameterId, parameters, parameterMap, currentUserId);
-                var qualityStatus = _evaluationService.EvaluateParameter(param, rReq.Value, rReq.StringValue);
-
+                var qualityStatus = _evaluationService.EvaluateParameter(param, val, strVal);
                 var requiredHours = param.RequiredDurationHours;
-                var startedAt = rReq.StartedAt?.ToUniversalTime() ?? report.SampleTime ?? report.CreatedAt;
-                var expectedCompletionAt = rReq.ExpectedCompletionAt?.ToUniversalTime() ?? (requiredHours > 0 ? startedAt.AddHours(requiredHours) : startedAt);
+                var startedAt = reqStartedAt?.ToUniversalTime() ?? report.SampleTime ?? report.CreatedAt;
+                var expectedCompletionAt = reqExpectedAt?.ToUniversalTime() ?? (requiredHours > 0 ? startedAt.AddHours(requiredHours) : startedAt);
 
-                bool hasEnteredResult = rReq.Value.HasValue || (!string.IsNullOrWhiteSpace(rReq.StringValue) && rReq.StringValue != "—" && !rReq.StringValue.Equals("pending", StringComparison.OrdinalIgnoreCase) && !rReq.StringValue.Equals("not entered", StringComparison.OrdinalIgnoreCase));
+                bool hasEnteredResult = IsResultEntered(val, strVal);
 
                 string resultStatus;
                 DateTime? actualCompletedAt = null;
@@ -447,11 +446,11 @@ namespace Aquora.Application.Services
                 if (hasEnteredResult)
                 {
                     resultStatus = "COMPLETED";
-                    actualCompletedAt = rReq.ActualCompletedAt?.ToUniversalTime() ?? now;
+                    actualCompletedAt = reqCompletedAt?.ToUniversalTime() ?? now;
                 }
                 else
                 {
-                    if (now > expectedCompletionAt)
+                    if (now > expectedCompletionAt && requiredHours > 0)
                     {
                         resultStatus = "OVERDUE";
                     }
@@ -470,10 +469,10 @@ namespace Aquora.Application.Services
                     Id = Guid.NewGuid(),
                     ReportId = report.Id,
                     ParameterId = param.Id,
-                    Value = rReq.Value,
-                    StringValue = rReq.StringValue,
-                    IsPass = qualityStatus == "PASS",
-                    QualityStatus = qualityStatus,
+                    Value = val,
+                    StringValue = strVal,
+                    IsPass = hasEnteredResult && qualityStatus == "PASS",
+                    QualityStatus = hasEnteredResult ? qualityStatus : "PENDING",
                     RequiredDurationHours = requiredHours,
                     StartedAt = startedAt,
                     ExpectedCompletionAt = expectedCompletionAt,
@@ -482,6 +481,22 @@ namespace Aquora.Application.Services
                     CreatedAt = DateTime.UtcNow,
                     CreatedBy = currentUserId
                 });
+            }
+
+            foreach (var rReq in request.Results)
+            {
+                if (string.IsNullOrWhiteSpace(rReq.ParameterId)) continue;
+                var param = ResolveOrCreateParameter(rReq.ParameterId, parameters, parameterMap, currentUserId);
+                AddResultRow(param, rReq.Value, rReq.StringValue, rReq.StartedAt, rReq.ExpectedCompletionAt, rReq.ActualCompletedAt);
+            }
+
+            // Automatically initialize any missing required active parameters for this ReportType
+            foreach (var reqParam in GetRequiredParametersForReportType(parameters, report.ReportType))
+            {
+                if (!addedParamIds.Contains(reqParam.Id))
+                {
+                    AddResultRow(reqParam, null, null, null, null, null);
+                }
             }
 
             _context.WaterTestReports.Add(report);
@@ -731,7 +746,63 @@ namespace Aquora.Application.Services
                 }
             }
 
-            // Remove obsolete / orphaned results safely through EF Core ChangeTracker
+            // Preserve existing pending/incubating results when omitted from the update request
+            var oldReportType = report.ReportType;
+            var reportTypeChanged = !string.Equals(oldReportType, request.ReportType, StringComparison.OrdinalIgnoreCase);
+
+            foreach (var existing in report.Results)
+            {
+                if (updatedResultIds.Contains(existing.Id)) continue;
+
+                // Keep existing result if report type didn't change OR if it already has an entered value
+                bool hasValue = IsResultEntered(existing.Value, existing.StringValue);
+                if (!reportTypeChanged || hasValue)
+                {
+                    updatedResultIds.Add(existing.Id);
+                }
+            }
+
+            // Initialize any required parameters for the target ReportType that are still missing
+            var coveredParamIds = report.Results
+                .Where(r => updatedResultIds.Contains(r.Id))
+                .Select(r => r.ParameterId)
+                .ToHashSet();
+
+            foreach (var reqParam in GetRequiredParametersForReportType(parameters, request.ReportType))
+            {
+                if (coveredParamIds.Contains(reqParam.Id)) continue;
+
+                var startedAt = report.SampleTime ?? report.CreatedAt;
+                var requiredHours = reqParam.RequiredDurationHours;
+                var expectedCompletionAt = requiredHours > 0 ? startedAt.AddHours(requiredHours) : startedAt;
+                var resultStatus = (now > expectedCompletionAt && requiredHours > 0)
+                    ? "OVERDUE"
+                    : (requiredHours > 0 ? "IN_PROGRESS" : "PENDING_RESULT");
+
+                var missingResult = new WaterTestResult
+                {
+                    Id = Guid.NewGuid(),
+                    ReportId = report.Id,
+                    ParameterId = reqParam.Id,
+                    Value = null,
+                    StringValue = null,
+                    IsPass = false,
+                    QualityStatus = "PENDING",
+                    RequiredDurationHours = requiredHours,
+                    StartedAt = startedAt,
+                    ExpectedCompletionAt = expectedCompletionAt,
+                    ActualCompletedAt = null,
+                    ResultStatus = resultStatus,
+                    CreatedAt = now,
+                    CreatedBy = currentUserId
+                };
+
+                _context.WaterTestResults.Add(missingResult);
+                updatedResultIds.Add(missingResult.Id);
+                coveredParamIds.Add(reqParam.Id);
+            }
+
+            // Remove obsolete / orphaned results safely through EF Core ChangeTracker (only if ReportType changed and unentered)
             var toRemove = report.Results
                 .Where(r => !updatedResultIds.Contains(r.Id))
                 .ToList();
@@ -874,14 +945,7 @@ namespace Aquora.Application.Services
                     : $"{report.Remarks} | {request.Remarks}";
             }
 
-            // Auto-update overall report status if all parameters are now completed
-            var allResults = report.Results.ToList();
-            bool allCompleted = allResults.All(r => r.ResultStatus == "COMPLETED" || r.Value.HasValue || (!string.IsNullOrWhiteSpace(r.StringValue) && r.StringValue != "—"));
-            if (allCompleted && report.Status == "DRAFT")
-            {
-                report.Status = "COMPLETED";
-            }
-
+            // Preserve separate report workflow status; MapToDto calculates ReportCompletionStatus = COMPLETED when all required rows are completed.
             await CheckAndGenerateCAPAsAsync(report);
             await _context.SaveChangesAsync();
 
@@ -1085,7 +1149,7 @@ namespace Aquora.Application.Services
                     runtimeStatus = "COMPLETED";
                     completedCount++;
                 }
-                else if (res.ExpectedCompletionAt.HasValue && now > res.ExpectedCompletionAt.Value)
+                else if (res.ExpectedCompletionAt.HasValue && now > res.ExpectedCompletionAt.Value && (res.RequiredDurationHours > 0 || (res.Parameter?.RequiredDurationHours ?? 0) > 0))
                 {
                     runtimeStatus = "OVERDUE";
                     isOverdue = true;
@@ -1145,7 +1209,7 @@ namespace Aquora.Application.Services
             }
 
             string reportCompletionStatus;
-            if (resultDtos.Count == 0 || r.Status == "DRAFT")
+            if (resultDtos.Count == 0)
             {
                 reportCompletionStatus = "DRAFT";
             }
@@ -1194,6 +1258,31 @@ namespace Aquora.Application.Services
                 EarliestDueAt = earliestDueAt,
                 Results = resultDtos
             };
+        }
+
+        private static bool IsResultEntered(double? value, string? stringValue)
+        {
+            return value.HasValue || (!string.IsNullOrWhiteSpace(stringValue)
+                && stringValue != "—"
+                && !stringValue.Equals("pending", StringComparison.OrdinalIgnoreCase)
+                && !stringValue.Equals("not entered", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static List<WaterTestParameter> GetRequiredParametersForReportType(IEnumerable<WaterTestParameter> parameters, string? reportType)
+        {
+            var type = (reportType ?? "DAILY").Trim().ToUpperInvariant();
+            var active = parameters.Where(p => p.IsActive).ToList();
+
+            if (type == "DAILY")
+            {
+                return active.Where(p => (p.Frequency ?? "DAILY").Trim().Equals("DAILY", StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            if (type == "WEEKLY")
+            {
+                return active.Where(p => (p.Frequency ?? "DAILY").Trim().Equals("WEEKLY", StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            // MONTHLY or EXTERNAL_LAB includes all active parameters
+            return active;
         }
 
         private string EvaluateResult(string parameterName, double? value, string? stringValue)

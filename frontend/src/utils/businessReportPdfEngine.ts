@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf'
-import type { BusinessReportDto } from '../services/api/reports'
+import type { BusinessReportDto, ProfitAndLossReportDto } from '../services/api/reports'
 import {
   drawCompanyPdfHeader,
   drawCompanyPdfContinuationHeader
@@ -895,6 +895,156 @@ export const generateBusinessReportPDF = (report: BusinessReportDto): jsPDF => {
     pdf.setFont('helvetica', 'bold')
     pdf.setTextColor(C_BODY[0], C_BODY[1], C_BODY[2])
     textRight(`Page ${i} of ${totalPages}`, rightMarginX, pageHeight - 5)
+  }
+
+  return pdf
+}
+
+export const generateProfitAndLossPDF = (pnl: ProfitAndLossReportDto): jsPDF => {
+  const pdf = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  })
+
+  const pageWidth = 210
+  const pageHeight = 297
+  const margin = 14
+  const contentWidth = pageWidth - margin * 2
+  const rightMarginX = pageWidth - margin
+  const bottomMargin = 18
+
+  const rawCurrency = (pnl.company?.currency || 'INR').toUpperCase().trim()
+  const currPrefix = rawCurrency === 'INR' ? 'INR ' : rawCurrency === 'USD' ? '$ ' : `${rawCurrency} `
+
+  const formatCurr = (val: number | undefined | null): string => {
+    const num = Number(val || 0)
+    const sign = num < 0 ? '-' : ''
+    return `${sign}${currPrefix}${Math.abs(num).toLocaleString('en-IN', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    })}`
+  }
+
+  const textRight = (text: string, x: number, currentY: number) => {
+    pdf.text(text, x - pdf.getTextWidth(text), currentY)
+  }
+
+  let y = drawCompanyPdfHeader(pdf, {
+    company: pnl.company,
+    docTitle: 'PROFIT & LOSS STATEMENT',
+    metaLines: [
+      `Period: ${pnl.period.formattedRange}`,
+      `Generated: ${pnl.period.generatedAtLocal}`
+    ],
+    startX: margin,
+    startY: 14,
+    rightMarginX
+  }).nextY
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > pageHeight - bottomMargin) {
+      pdf.addPage()
+      y = drawCompanyPdfContinuationHeader(pdf, {
+        company: pnl.company,
+        docTitle: 'PROFIT & LOSS STATEMENT',
+        metaText: pnl.period.formattedRange,
+        startX: margin,
+        startY: 16,
+        rightMarginX
+      })
+    }
+  }
+
+  const drawSectionHeader = (title: string) => {
+    ensureSpace(10)
+    pdf.setFillColor(241, 245, 249)
+    pdf.rect(margin, y, contentWidth, 7, 'F')
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(8.5)
+    pdf.setTextColor(15, 23, 42)
+    pdf.text(title, margin + 3, y + 4.8)
+    y += 9
+  }
+
+  const drawRow = (label: string, value: string, opts?: { bold?: boolean; indent?: number; highlight?: 'success' | 'danger' | 'neutral' }) => {
+    ensureSpace(7)
+    const indent = opts?.indent ?? 3
+    if (opts?.highlight) {
+      pdf.setFillColor(opts.highlight === 'success' ? 236 : opts.highlight === 'danger' ? 254 : 248, opts.highlight === 'success' ? 253 : opts.highlight === 'danger' ? 242 : 250, opts.highlight === 'success' ? 245 : opts.highlight === 'danger' ? 242 : 252)
+      pdf.rect(margin, y - 3.8, contentWidth, 6.2, 'F')
+    }
+    pdf.setFont('helvetica', opts?.bold ? 'bold' : 'normal')
+    pdf.setFontSize(8.5)
+    pdf.setTextColor(opts?.bold ? 15 : 51, opts?.bold ? 23 : 65, opts?.bold ? 42 : 85)
+    pdf.text(label, margin + indent, y)
+    if (opts?.highlight === 'success') pdf.setTextColor(22, 101, 52)
+    else if (opts?.highlight === 'danger') pdf.setTextColor(185, 28, 28)
+    textRight(value, rightMarginX - 3, y)
+    pdf.setDrawColor(226, 232, 240)
+    pdf.setLineWidth(0.2)
+    pdf.line(margin, y + 2, rightMarginX, y + 2)
+    y += 6.2
+  }
+
+  drawSectionHeader('REVENUE')
+  drawRow(`Sales Revenue (Excl. GST, Before Discount) (${pnl.revenue.salesOrdersCount} orders)`, formatCurr(pnl.revenue.salesGrossBeforeDiscount))
+  if (pnl.revenue.twentyLGrossBeforeDiscount > 0 || pnl.revenue.twentyLDeliveriesCount > 0) {
+    drawRow(`20L Delivery Revenue (Excl. GST) (${pnl.revenue.twentyLDeliveriesCount} deliveries)`, formatCurr(pnl.revenue.twentyLGrossBeforeDiscount))
+  }
+  drawRow('Less: Sales Discounts', `-${formatCurr(pnl.revenue.totalDiscounts)}`)
+  drawRow(`Less: Sales Returns (${pnl.revenue.returnsCount} returns)`, `-${formatCurr(pnl.revenue.salesReturns)}`)
+  drawRow('Net Sales Revenue', formatCurr(pnl.revenue.netSalesRevenue), { bold: true, highlight: 'neutral' })
+  y += 2
+
+  drawSectionHeader('DIRECT COSTS (PERIOD PURCHASES & LOSSES)')
+  drawRow('Direct Material Purchases (Inventory, Excl. GST)', formatCurr(pnl.directCosts.materialPurchases))
+  drawRow('Sales Damage Losses', formatCurr(pnl.directCosts.salesDamageLoss))
+  if (pnl.directCosts.twentyLCommissions > 0) {
+    drawRow('20L Distributor Commissions', formatCurr(pnl.directCosts.twentyLCommissions))
+  }
+  drawRow('Total Direct Costs', formatCurr(pnl.directCosts.totalDirectCosts), { bold: true })
+  drawRow(`Gross Profit (${pnl.grossMarginPercent.toFixed(2)}% Margin)`, formatCurr(pnl.grossProfit), {
+    bold: true,
+    highlight: pnl.grossProfit >= 0 ? 'success' : 'danger'
+  })
+  y += 2
+
+  drawSectionHeader('OPERATING EXPENSES & PAYROLL')
+  pnl.operatingExpenses.simpleExpensesByCategory.forEach((cat) => {
+    drawRow(`Expense: ${cat.category} (${cat.count})`, formatCurr(cat.totalAmount), { indent: 6 })
+  })
+  pnl.operatingExpenses.expensePurchasesByCategory.forEach((cat) => {
+    drawRow(`Purchase Expense: ${cat.category} (${cat.count})`, formatCurr(cat.totalAmount), { indent: 6 })
+  })
+  drawRow('Salaries Paid (Payroll)', formatCurr(pnl.operatingExpenses.salariesPaid))
+  drawRow('Total Operating Expenses', formatCurr(pnl.operatingExpenses.totalOperatingExpenses), { bold: true })
+  y += 2
+
+  drawRow(`NET PROFIT / (LOSS) (${pnl.netMarginPercent.toFixed(2)}% Margin)`, formatCurr(pnl.netProfit), {
+    bold: true,
+    highlight: pnl.netProfit >= 0 ? 'success' : 'danger'
+  })
+  y += 3
+
+  drawSectionHeader('INFORMATIONAL & EXCLUDED ITEMS (NON-P&L)')
+  drawRow('Output GST Collected (Excluded from Revenue)', formatCurr(pnl.informational.outputGstCollected))
+  drawRow('Input GST on Purchases (Excluded from Costs)', formatCurr(pnl.informational.inputGstOnPurchases))
+  drawRow('CapEx / Asset Purchases (Excluded from P&L)', formatCurr(pnl.informational.capExAssetPurchasesExcluded))
+  drawRow('Cancelled Purchases (Excluded)', formatCurr(pnl.informational.cancelledPurchasesExcluded))
+
+  if (pnl.disclosures.length > 0) {
+    y += 3
+    drawSectionHeader('ACCOUNTING BASIS & DISCLOSURES')
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(7.5)
+    pdf.setTextColor(71, 85, 105)
+    pnl.disclosures.forEach((note) => {
+      const lines = pdf.splitTextToSize(`• ${note}`, contentWidth - 6)
+      ensureSpace(lines.length * 4 + 2)
+      pdf.text(lines, margin + 3, y)
+      y += lines.length * 3.8 + 1.5
+    })
   }
 
   return pdf

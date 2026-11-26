@@ -389,6 +389,58 @@ export interface BusinessReportDto {
   qualityControl: QCReportSectionDto
 }
 
+export interface ProfitAndLossRevenueDto {
+  salesGrossBeforeDiscount: number
+  twentyLGrossBeforeDiscount: number
+  totalGrossBeforeDiscount: number
+  totalDiscounts: number
+  salesReturns: number
+  netSalesRevenue: number
+  salesOrdersCount: number
+  twentyLDeliveriesCount: number
+  returnsCount: number
+}
+
+export interface ProfitAndLossDirectCostsDto {
+  materialPurchases: number
+  salesDamageLoss: number
+  twentyLCommissions: number
+  totalDirectCosts: number
+}
+
+export interface ProfitAndLossOperatingExpensesDto {
+  simpleExpensesByCategory: ExpenseCategorySummaryDto[]
+  totalSimpleExpenses: number
+  expensePurchasesByCategory: ExpenseCategorySummaryDto[]
+  totalExpensePurchases: number
+  salariesPaid: number
+  totalOperatingExpenses: number
+}
+
+export interface ProfitAndLossInformationalDto {
+  outputGstCollected: number
+  inputGstOnPurchases: number
+  capExAssetPurchasesExcluded: number
+  cancelledPurchasesExcluded: number
+  depreciationEventsCount: number
+  simpleExpensesSalaryOverlapAmount: number
+}
+
+export interface ProfitAndLossReportDto {
+  period: ReportPeriodDto
+  company: CompanyReportInfoDto
+  revenue: ProfitAndLossRevenueDto
+  directCosts: ProfitAndLossDirectCostsDto
+  grossProfit: number
+  grossMarginPercent: number
+  operatingExpenses: ProfitAndLossOperatingExpensesDto
+  operatingProfit: number
+  netProfit: number
+  netMarginPercent: number
+  informational: ProfitAndLossInformationalDto
+  disclosures: string[]
+}
+
 export const reportsApi = {
   getReport: async (filters: ReportFilterRequest): Promise<{ success: boolean; data: BusinessReportDto; message?: string }> => {
     const tzOffset = new Date().getTimezoneOffset()
@@ -407,6 +459,16 @@ export const reportsApi = {
       tzOffset
     }
     const response = await api.post('/api/v1/reports/generate', payload)
+    return response.data
+  },
+
+  generateProfitAndLoss: async (request: ReportFilterRequest): Promise<{ success: boolean; data: ProfitAndLossReportDto; message?: string }> => {
+    const tzOffset = new Date().getTimezoneOffset()
+    const payload = {
+      ...request,
+      tzOffset
+    }
+    const response = await api.post('/api/v1/reports/profit-and-loss', payload)
     return response.data
   }
 }

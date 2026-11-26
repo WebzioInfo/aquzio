@@ -146,7 +146,8 @@ export const WaterTestReportDetailPage: React.FC = () => {
       const res = await waterTestApi.enterSingleResult(report.id, editingResult.parameterId, {
         value: numVal,
         stringValue: strVal,
-        testedBy: user?.fullName || user?.email || 'QC Chemist'
+        testedBy: user?.fullName || user?.email || 'QC Chemist',
+        concurrencyToken: report.concurrencyToken || undefined
       });
       toast.success(`Result updated for ${editingResult.parameterName}`);
       setReport(res.data);
@@ -239,8 +240,11 @@ export const WaterTestReportDetailPage: React.FC = () => {
     if (lifecycle === 'OVERDUE') {
       return <EnterpriseBadge variant="danger">Overdue</EnterpriseBadge>;
     }
-    if (lifecycle === 'IN_PROGRESS' || lifecycle === 'PENDING_RESULT') {
+    if (lifecycle === 'IN_PROGRESS') {
       return <EnterpriseBadge variant="info">Incubating</EnterpriseBadge>;
+    }
+    if (lifecycle === 'PENDING_RESULT') {
+      return <EnterpriseBadge variant="warning">Pending Result</EnterpriseBadge>;
     }
     if (lifecycle === 'NOT_STARTED') {
       return <EnterpriseBadge variant="gray">Not Started</EnterpriseBadge>;
@@ -372,7 +376,8 @@ export const WaterTestReportDetailPage: React.FC = () => {
           <div className="flex items-center gap-3">
             {compStatus === 'RESULTS_OVERDUE' && <EnterpriseBadge variant="danger">Overdue Results</EnterpriseBadge>}
             {compStatus === 'IN_PROGRESS' && <EnterpriseBadge variant="info">Incubating (In Progress)</EnterpriseBadge>}
-            {compStatus === 'PARTIALLY_COMPLETED' && <EnterpriseBadge variant="warning">Partially Completed</EnterpriseBadge>}
+            {compStatus === 'PARTIALLY_COMPLETED' && <EnterpriseBadge variant="warning">Pending ({report.completedParametersCount ?? 0}/{report.totalParametersCount ?? report.results.length})</EnterpriseBadge>}
+            {compStatus === 'DRAFT' && <EnterpriseBadge variant="gray">Draft</EnterpriseBadge>}
             {compStatus === 'COMPLETED' && <EnterpriseBadge variant="success">Completed</EnterpriseBadge>}
           </div>
         </div>
@@ -443,11 +448,20 @@ export const WaterTestReportDetailPage: React.FC = () => {
                     <tr key={r.id} className="h-11">
                       <td className="py-3 px-4 font-medium text-slate-900">{r.parameterName}</td>
                       <td className="py-3 px-4 font-semibold text-slate-800">
-                        {r.stringValue ? r.stringValue : (r.value !== null && r.value !== undefined ? r.value : '—')}
+                        {r.stringValue ? r.stringValue : (r.value !== null && r.value !== undefined ? r.value : (isPending ? <span className="text-amber-600 italic">{r.resultStatus === 'IN_PROGRESS' ? 'Under Incubation' : 'Pending Result'}</span> : '—'))}
                       </td>
                       <td className="py-3 px-4 text-slate-500 font-medium">{r.parameterUnit}</td>
                       <td className="py-3 px-4 text-slate-600">
-                        {r.requiredDurationHours ? `${r.requiredDurationHours}h duration` : 'Immediate (0h)'}
+                        {r.requiredDurationHours ? (
+                          <span>
+                            {r.requiredDurationHours}h duration
+                            {isPending && r.expectedCompletionAt && (
+                              <span className="block text-[11px] text-slate-400">
+                                Due: {format(new Date(r.expectedCompletionAt), 'dd MMM, hh:mm a')}
+                              </span>
+                            )}
+                          </span>
+                        ) : 'Immediate (0h)'}
                       </td>
                       <td className="py-3 px-4">{getParameterStatusBadge(r)}</td>
                       <td className="py-3 px-4 text-right">

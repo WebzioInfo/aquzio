@@ -440,4 +440,61 @@ namespace Aquora.Application.DTOs.Reports
         public string OverallStatus { get; set; } = string.Empty;
         public string TestedBy { get; set; } = string.Empty;
     }
+
+    public class ProfitAndLossReportDto
+    {
+        public ReportPeriodDto Period { get; set; } = new();
+        public CompanyReportInfoDto Company { get; set; } = new();
+        public ProfitAndLossRevenueDto Revenue { get; set; } = new();
+        public ProfitAndLossDirectCostsDto DirectCosts { get; set; } = new();
+        public decimal GrossProfit { get; set; }
+        public decimal GrossMarginPercent { get; set; }
+        public ProfitAndLossOperatingExpensesDto OperatingExpenses { get; set; } = new();
+        public decimal OperatingProfit { get; set; }
+        public decimal NetProfit { get; set; }
+        public decimal NetMarginPercent { get; set; }
+        public ProfitAndLossInformationalDto Informational { get; set; } = new();
+        public List<string> Disclosures { get; set; } = new();
+    }
+
+    public class ProfitAndLossRevenueDto
+    {
+        public decimal SalesGrossBeforeDiscount { get; set; }
+        public decimal TwentyLGrossBeforeDiscount { get; set; }
+        public decimal TotalGrossBeforeDiscount { get; set; }
+        public decimal TotalDiscounts { get; set; }
+        public decimal SalesReturns { get; set; }
+        public decimal NetSalesRevenue { get; set; }
+        public int SalesOrdersCount { get; set; }
+        public int TwentyLDeliveriesCount { get; set; }
+        public int ReturnsCount { get; set; }
+    }
+
+    public class ProfitAndLossDirectCostsDto
+    {
+        public decimal MaterialPurchases { get; set; }
+        public decimal SalesDamageLoss { get; set; }
+        public decimal TwentyLCommissions { get; set; }
+        public decimal TotalDirectCosts { get; set; }
+    }
+
+    public class ProfitAndLossOperatingExpensesDto
+    {
+        public List<ExpenseCategorySummaryDto> SimpleExpensesByCategory { get; set; } = new();
+        public decimal TotalSimpleExpenses { get; set; }
+        public List<ExpenseCategorySummaryDto> ExpensePurchasesByCategory { get; set; } = new();
+        public decimal TotalExpensePurchases { get; set; }
+        public decimal SalariesPaid { get; set; }
+        public decimal TotalOperatingExpenses { get; set; }
+    }
+
+    public class ProfitAndLossInformationalDto
+    {
+        public decimal OutputGstCollected { get; set; }
+        public decimal InputGstOnPurchases { get; set; }
+        public decimal CapExAssetPurchasesExcluded { get; set; }
+        public decimal CancelledPurchasesExcluded { get; set; }
+        public int DepreciationEventsCount { get; set; }
+        public decimal SimpleExpensesSalaryOverlapAmount { get; set; }
+    }
 }

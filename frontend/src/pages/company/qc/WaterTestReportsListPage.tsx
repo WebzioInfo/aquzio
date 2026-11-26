@@ -82,12 +82,17 @@ export const WaterTestReportsListPage: React.FC = () => {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   const getCompletionBadge = (report: WaterTestReport) => {
-    const comp = report.completionStatus || 'COMPLETED';
+    const total = report.totalParametersCount ?? report.results?.length ?? 0;
+    const completed = report.completedParametersCount ?? (report.results ? report.results.filter(r => r.resultStatus === 'COMPLETED').length : 0);
+    let comp = report.completionStatus || 'COMPLETED';
+    if (comp === 'COMPLETED' && total > 0 && completed < total) {
+      comp = (report.overdueParametersCount ?? 0) > 0 ? 'RESULTS_OVERDUE' : 'PARTIALLY_COMPLETED';
+    }
     switch (comp) {
       case 'RESULTS_OVERDUE':
         return <EnterpriseBadge variant="danger">Overdue</EnterpriseBadge>;
       case 'PARTIALLY_COMPLETED':
-        return <EnterpriseBadge variant="warning">Partially Done</EnterpriseBadge>;
+        return <EnterpriseBadge variant="warning">Pending</EnterpriseBadge>;
       case 'IN_PROGRESS':
         return <EnterpriseBadge variant="info">Incubating</EnterpriseBadge>;
       case 'DRAFT':

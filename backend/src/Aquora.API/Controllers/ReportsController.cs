@@ -81,5 +81,62 @@ namespace Aquora.API.Controllers
                 return Failure<BusinessReportDto>(ex.Message, "Failed to generate business report.", System.Net.HttpStatusCode.InternalServerError);
             }
         }
+
+        [HttpGet("profit-and-loss")]
+        public async Task<ActionResult<ApiResponse<ProfitAndLossReportDto>>> GetProfitAndLoss(
+            [FromQuery] DateTime? dateFrom = null,
+            [FromQuery] DateTime? dateTo = null,
+            [FromQuery] string? preset = "30days",
+            [FromQuery] int tzOffset = -330,
+            [FromQuery] Guid? productId = null,
+            [FromQuery] Guid? customerId = null)
+        {
+            try
+            {
+                var request = new ReportFilterRequest
+                {
+                    DateFrom = dateFrom,
+                    DateTo = dateTo,
+                    Preset = preset,
+                    TzOffset = tzOffset,
+                    ProductId = productId,
+                    CustomerId = customerId
+                };
+
+                var report = await _reportService.GenerateProfitAndLossAsync(request);
+                return Success(report, "Profit & Loss report generated successfully.");
+            }
+            catch (UnauthorizedAccessException uex)
+            {
+                return Failure<ProfitAndLossReportDto>(uex.Message, "Unauthorized", System.Net.HttpStatusCode.Unauthorized);
+            }
+            catch (Exception ex)
+            {
+                return Failure<ProfitAndLossReportDto>(ex.Message, "Failed to generate Profit & Loss report.", System.Net.HttpStatusCode.InternalServerError);
+            }
+        }
+
+        [HttpPost("profit-and-loss")]
+        public async Task<ActionResult<ApiResponse<ProfitAndLossReportDto>>> GenerateProfitAndLoss([FromBody] ReportFilterRequest request)
+        {
+            try
+            {
+                if (request == null)
+                {
+                    return BadRequest(ApiResponse<ProfitAndLossReportDto>.CreateFailure("Request payload cannot be empty.", "Invalid Request", HttpContext.TraceIdentifier));
+                }
+
+                var report = await _reportService.GenerateProfitAndLossAsync(request);
+                return Success(report, "Profit & Loss report generated successfully.");
+            }
+            catch (UnauthorizedAccessException uex)
+            {
+                return Failure<ProfitAndLossReportDto>(uex.Message, "Unauthorized", System.Net.HttpStatusCode.Unauthorized);
+            }
+            catch (Exception ex)
+            {
+                return Failure<ProfitAndLossReportDto>(ex.Message, "Failed to generate Profit & Loss report.", System.Net.HttpStatusCode.InternalServerError);
+            }
+        }
     }
 }

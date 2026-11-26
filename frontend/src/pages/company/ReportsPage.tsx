@@ -7,10 +7,10 @@ import {
   ShieldCheck, Printer, BarChart3, PieChart, Sparkles
 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
-import { reportsApi, type BusinessReportDto, type ReportFilterRequest } from '../../services/api/reports'
+import { reportsApi, type BusinessReportDto, type ProfitAndLossReportDto, type ReportFilterRequest } from '../../services/api/reports'
 import { productsService } from '../../services/products'
 import { customersService } from '../../services/customers'
-import { generateBusinessReportPDF } from '../../utils/businessReportPdfEngine'
+import { generateBusinessReportPDF, generateProfitAndLossPDF } from '../../utils/businessReportPdfEngine'
 import { useNotificationStore } from '../../store/useNotificationStore'
 import EnterpriseCard from '../../components/ui/EnterpriseCard'
 import EnterpriseButton from '../../components/ui/EnterpriseButton'
@@ -81,6 +81,7 @@ export const ReportsPage: React.FC = () => {
 
   // Active Report & Stale tracking
   const [activeReport, setActiveReport] = useState<BusinessReportDto | null>(null)
+  const [pnlReport, setPnlReport] = useState<ProfitAndLossReportDto | null>(null)
   const [isGenerating, setIsGenerating] = useState<boolean>(false)
   const [isDownloadingPdf, setIsDownloadingPdf] = useState<boolean>(false)
   const [isStale, setIsStale] = useState<boolean>(false)
@@ -128,9 +129,15 @@ export const ReportsPage: React.FC = () => {
         status: selectedStatus || null
       }
 
-      const res = await reportsApi.generateReport(request)
+      const [res, pnlRes] = await Promise.all([
+        reportsApi.generateReport(request),
+        reportsApi.generateProfitAndLoss(request)
+      ])
       if (res.success && res.data) {
         setActiveReport(res.data)
+        if (pnlRes.success && pnlRes.data) {
+          setPnlReport(pnlRes.data)
+        }
         setIsStale(false)
         showToast('Business report generated successfully.', 'success')
       } else {
@@ -171,6 +178,26 @@ export const ReportsPage: React.FC = () => {
 
   // Handle PDF Export
   const handleDownloadPDF = () => {
+    if (activeTab === 'pnl') {
+      if (!pnlReport) {
+        showToast('Please generate the Profit & Loss report first.', 'error')
+        return
+      }
+      setIsDownloadingPdf(true)
+      try {
+        const pdf = generateProfitAndLossPDF(pnlReport)
+        const cleanRange = pnlReport.period.formattedRange.replace(/[\s—]/g, '_')
+        pdf.save(`Aquzio_Profit_And_Loss_${cleanRange}.pdf`)
+        showToast('Profit & Loss PDF downloaded successfully.', 'success')
+      } catch (pdfErr: any) {
+        console.error('P&L PDF export failed:', pdfErr)
+        showToast('Failed to generate P&L PDF document.', 'error')
+      } finally {
+        setIsDownloadingPdf(false)
+      }
+      return
+    }
+
     if (!activeReport) {
       showToast('Please generate a report first.', 'error')
       return
@@ -232,6 +259,7 @@ export const ReportsPage: React.FC = () => {
     { id: 'customers', label: 'Customer Performance', icon: <Users className="w-4 h-4" />, count: activeReport?.customers.customers.length },
     { id: 'inventory', label: 'Inventory Movement', icon: <Boxes className="w-4 h-4" />, count: activeReport?.inventory.productMovements.length },
     { id: 'accounts', label: 'Financials & Purchases', icon: <DollarSign className="w-4 h-4" />, count: activeReport?.financials.recentPurchases.length },
+    { id: 'pnl', label: 'Profit & Loss', icon: <TrendingUp className="w-4 h-4" /> },
     { id: 'qc', label: 'Quality Control', icon: <Droplets className="w-4 h-4" />, count: activeReport?.qualityControl.recentTests.length },
   ]
 
@@ -1380,6 +1408,109 @@ export const ReportsPage: React.FC = () => {
                   )}
                 </EnterpriseCard>
               </div>
+            </div>
+          )}
+
+          {/* ======================================================== */}
+          {/* TAB 9B: PROFIT & LOSS (P&L) STATEMENT                    */}
+          {/* ======================================================== */}
+          {activeTab === 'pnl' && (
+            <div className="space-y-6">
+              {!pnlReport ? (
+                <EnterpriseCard title="Profit & Loss Statement">
+                  <EnterpriseEmptyState title="Profit & Loss Data Unavailable" description="Click Generate Report to load the Profit & Loss statement for this period." />
+                </EnterpriseCard>
+              ) : (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <EnterpriseCard className="p-4 border-l-4 border-l-blue-500">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Net Sales Revenue</p>
+                      <p className="mt-1 text-xl font-extrabold text-slate-900">{formatCurr(pnlReport.revenue.netSalesRevenue)}</p>
+                    </EnterpriseCard>
+                    <EnterpriseCard className="p-4 border-l-4 border-l-amber-500">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Gross Profit ({pnlReport.grossMarginPercent.toFixed(1)}%)</p>
+                      <p className={`mt-1 text-xl font-extrabold ${pnlReport.grossProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{formatCurr(pnlReport.grossProfit)}</p>
+                    </EnterpriseCard>
+                    <EnterpriseCard className="p-4 border-l-4 border-l-purple-500">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Operating Expenses</p>
+                      <p className="mt-1 text-xl font-extrabold text-slate-900">{formatCurr(pnlReport.operatingExpenses.totalOperatingExpenses)}</p>
+                    </EnterpriseCard>
+                    <EnterpriseCard className={`p-4 border-l-4 ${pnlReport.netProfit >= 0 ? 'border-l-emerald-600' : 'border-l-rose-600'}`}>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Net Profit / (Loss) ({pnlReport.netMarginPercent.toFixed(1)}%)</p>
+                      <p className={`mt-1 text-xl font-extrabold ${pnlReport.netProfit >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>{formatCurr(pnlReport.netProfit)}</p>
+                    </EnterpriseCard>
+                  </div>
+
+                  <EnterpriseCard title={`Profit & Loss Statement (${pnlReport.period.formattedRange})`}>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="h-10 border-b border-slate-200 text-slate-700 font-bold bg-slate-50">
+                            <th className="py-2.5 px-4">Particulars</th>
+                            <th className="py-2.5 px-4 text-right">Amount ({curr})</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          <tr className="bg-slate-50/70"><td colSpan={2} className="py-2 px-4 font-bold text-slate-800 uppercase tracking-wider">Revenue</td></tr>
+                          <tr><td className="py-2.5 px-6 text-slate-700">Sales Revenue (Excl. GST, Before Discount) ({pnlReport.revenue.salesOrdersCount} orders)</td><td className="py-2.5 px-4 text-right font-semibold">{formatCurr(pnlReport.revenue.salesGrossBeforeDiscount)}</td></tr>
+                          {(pnlReport.revenue.twentyLGrossBeforeDiscount > 0 || pnlReport.revenue.twentyLDeliveriesCount > 0) && (
+                            <tr><td className="py-2.5 px-6 text-slate-700">20L Delivery Revenue (Excl. GST) ({pnlReport.revenue.twentyLDeliveriesCount} deliveries)</td><td className="py-2.5 px-4 text-right font-semibold">{formatCurr(pnlReport.revenue.twentyLGrossBeforeDiscount)}</td></tr>
+                          )}
+                          <tr><td className="py-2.5 px-6 text-slate-600">Less: Sales Discounts</td><td className="py-2.5 px-4 text-right text-rose-600">-{formatCurr(pnlReport.revenue.totalDiscounts)}</td></tr>
+                          <tr><td className="py-2.5 px-6 text-slate-600">Less: Sales Returns ({pnlReport.revenue.returnsCount} returns)</td><td className="py-2.5 px-4 text-right text-rose-600">-{formatCurr(pnlReport.revenue.salesReturns)}</td></tr>
+                          <tr className="bg-blue-50/50 font-bold text-slate-900"><td className="py-3 px-4">Net Sales Revenue</td><td className="py-3 px-4 text-right">{formatCurr(pnlReport.revenue.netSalesRevenue)}</td></tr>
+
+                          <tr className="bg-slate-50/70"><td colSpan={2} className="py-2 px-4 font-bold text-slate-800 uppercase tracking-wider">Direct Costs (Period Purchases & Losses)</td></tr>
+                          <tr><td className="py-2.5 px-6 text-slate-700">Direct Material Purchases (Inventory, Excl. GST)</td><td className="py-2.5 px-4 text-right">{formatCurr(pnlReport.directCosts.materialPurchases)}</td></tr>
+                          <tr><td className="py-2.5 px-6 text-slate-700">Sales Damage Losses</td><td className="py-2.5 px-4 text-right">{formatCurr(pnlReport.directCosts.salesDamageLoss)}</td></tr>
+                          {pnlReport.directCosts.twentyLCommissions > 0 && (
+                            <tr><td className="py-2.5 px-6 text-slate-700">20L Distributor Commissions</td><td className="py-2.5 px-4 text-right">{formatCurr(pnlReport.directCosts.twentyLCommissions)}</td></tr>
+                          )}
+                          <tr className="font-semibold text-slate-800"><td className="py-2.5 px-4">Total Direct Costs</td><td className="py-2.5 px-4 text-right text-rose-700">-{formatCurr(pnlReport.directCosts.totalDirectCosts)}</td></tr>
+                          <tr className={`${pnlReport.grossProfit >= 0 ? 'bg-emerald-50/60 text-emerald-900' : 'bg-rose-50/60 text-rose-900'} font-bold`}>
+                            <td className="py-3 px-4">Gross Profit ({pnlReport.grossMarginPercent.toFixed(2)}% Margin)</td>
+                            <td className="py-3 px-4 text-right">{formatCurr(pnlReport.grossProfit)}</td>
+                          </tr>
+
+                          <tr className="bg-slate-50/70"><td colSpan={2} className="py-2 px-4 font-bold text-slate-800 uppercase tracking-wider">Operating Expenses & Payroll</td></tr>
+                          {pnlReport.operatingExpenses.simpleExpensesByCategory.map((cat) => (
+                            <tr key={`se-${cat.category}`}><td className="py-2 px-6 text-slate-700">Expense: {cat.category} ({cat.count})</td><td className="py-2 px-4 text-right">{formatCurr(cat.totalAmount)}</td></tr>
+                          ))}
+                          {pnlReport.operatingExpenses.expensePurchasesByCategory.map((cat) => (
+                            <tr key={`pe-${cat.category}`}><td className="py-2 px-6 text-slate-700">Purchase Expense: {cat.category} ({cat.count})</td><td className="py-2 px-4 text-right">{formatCurr(cat.totalAmount)}</td></tr>
+                          ))}
+                          <tr><td className="py-2.5 px-6 text-slate-700">Salaries Paid (Payroll)</td><td className="py-2.5 px-4 text-right">{formatCurr(pnlReport.operatingExpenses.salariesPaid)}</td></tr>
+                          <tr className="font-semibold text-slate-800"><td className="py-2.5 px-4">Total Operating Expenses</td><td className="py-2.5 px-4 text-right text-rose-700">-{formatCurr(pnlReport.operatingExpenses.totalOperatingExpenses)}</td></tr>
+
+                          <tr className={`${pnlReport.netProfit >= 0 ? 'bg-emerald-100/70 text-emerald-950' : 'bg-rose-100/70 text-rose-950'} font-extrabold text-sm`}>
+                            <td className="py-3.5 px-4">Net Profit / (Loss) ({pnlReport.netMarginPercent.toFixed(2)}% Margin)</td>
+                            <td className="py-3.5 px-4 text-right">{formatCurr(pnlReport.netProfit)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  </EnterpriseCard>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <EnterpriseCard title="Informational & Excluded Items (Non-P&L)">
+                      <div className="space-y-2.5 text-xs">
+                        <div className="flex justify-between py-1.5 border-b border-slate-100"><span className="text-slate-600">Output GST Collected (Excluded from Revenue)</span><span className="font-bold text-slate-800">{formatCurr(pnlReport.informational.outputGstCollected)}</span></div>
+                        <div className="flex justify-between py-1.5 border-b border-slate-100"><span className="text-slate-600">Input GST on Purchases (Excluded from Costs)</span><span className="font-bold text-slate-800">{formatCurr(pnlReport.informational.inputGstOnPurchases)}</span></div>
+                        <div className="flex justify-between py-1.5 border-b border-slate-100"><span className="text-slate-600">CapEx / Asset Purchases (Excluded from P&L)</span><span className="font-bold text-slate-800">{formatCurr(pnlReport.informational.capExAssetPurchasesExcluded)}</span></div>
+                        <div className="flex justify-between py-1.5"><span className="text-slate-600">Cancelled Purchases (Excluded)</span><span className="font-bold text-slate-800">{formatCurr(pnlReport.informational.cancelledPurchasesExcluded)}</span></div>
+                      </div>
+                    </EnterpriseCard>
+
+                    <EnterpriseCard title="Accounting Basis & Disclosures">
+                      <ul className="space-y-2 text-xs text-slate-600 list-disc pl-4">
+                        {pnlReport.disclosures.map((note, idx) => (
+                          <li key={idx}>{note}</li>
+                        ))}
+                      </ul>
+                    </EnterpriseCard>
+                  </div>
+                </>
+              )}
             </div>
           )}
 

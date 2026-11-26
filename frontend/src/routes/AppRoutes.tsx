@@ -21,6 +21,8 @@ const CompanyOnboardingPage = React.lazy(() => import('../pages/CompanyOnboardin
 const PlatformDashboardPage = React.lazy(() => import('../pages/platform/PlatformDashboardPage'))
 const PlatformManagementPage = React.lazy(() => import('../pages/platform/PlatformManagementPage'))
 const SettingsPage = React.lazy(() => import('../pages/company/SettingsPage').then(module => ({ default: module.SettingsPage })))
+const CompanyProfilePage = React.lazy(() => import('../pages/company/CompanyProfilePage'))
+const CompanyGalleryPage = React.lazy(() => import('../pages/company/CompanyGalleryPage'))
 const CompanyDashboardPage = React.lazy(() => import('../pages/company/CompanyDashboardPage'))
 const OwnerDashboardPage = React.lazy(() => import('../pages/company/OwnerDashboardPage'))
 const ProductionSetupPage = React.lazy(() => import('../pages/company/ProductionSetupPage'))
@@ -728,6 +730,8 @@ export const AppRoutes: React.FC = () => {
           <Route path="suppliers" element={<CompanyDashboardPage />} />
           <Route path="employees" element={<CompanyDashboardPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="company-profile" element={<CompanyProfilePage />} />
+          <Route path="gallery" element={<CompanyGalleryPage />} />
           <Route path="profile" element={<UserProfilePage />} />
           <Route path="backups" element={<BackupRestorePage />} />
           <Route path="operations" element={<OperationsPage />} />

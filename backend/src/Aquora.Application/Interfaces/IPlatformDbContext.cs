@@ -9,6 +9,8 @@ namespace Aquora.Application.Interfaces
     public interface IPlatformDbContext
     {
         DbSet<Tenant> Tenants { get; }
+        DbSet<CompanyPublicProfile> CompanyPublicProfiles { get; }
+        DbSet<CompanyGalleryImage> CompanyGalleryImages { get; }
         DbSet<User> Users { get; }
         DbSet<TenantDomain> TenantDomains { get; }
         DbSet<OTPVerification> OTPVerifications { get; }

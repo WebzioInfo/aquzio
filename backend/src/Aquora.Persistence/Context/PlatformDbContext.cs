@@ -22,6 +22,8 @@ namespace Aquora.Persistence.Context
         }
 
         public DbSet<Tenant> Tenants => Set<Tenant>();
+        public DbSet<CompanyPublicProfile> CompanyPublicProfiles => Set<CompanyPublicProfile>();
+        public DbSet<CompanyGalleryImage> CompanyGalleryImages => Set<CompanyGalleryImage>();
         public DbSet<User> Users => Set<User>();
         public DbSet<TenantDomain> TenantDomains => Set<TenantDomain>();
         public DbSet<OTPVerification> OTPVerifications => Set<OTPVerification>();
@@ -69,6 +71,31 @@ namespace Aquora.Persistence.Context
             modelBuilder.Entity<Tenant>()
                 .Property(t => t.IsBiodropsProduction)
                 .HasDefaultValue(false);
+
+            modelBuilder.Entity<CompanyPublicProfile>()
+                .ToTable("CompanyPublicProfiles", "public");
+
+            modelBuilder.Entity<CompanyPublicProfile>()
+                .HasIndex(cp => cp.TenantId)
+                .IsUnique();
+
+            modelBuilder.Entity<CompanyPublicProfile>()
+                .HasOne(cp => cp.Tenant)
+                .WithMany()
+                .HasForeignKey(cp => cp.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            modelBuilder.Entity<CompanyGalleryImage>()
+                .ToTable("CompanyGalleryImages", "public");
+
+            modelBuilder.Entity<CompanyGalleryImage>()
+                .HasIndex(gi => new { gi.TenantId, gi.IsDeleted, gi.IsPublic, gi.DisplayOrder });
+
+            modelBuilder.Entity<CompanyGalleryImage>()
+                .HasOne(gi => gi.Tenant)
+                .WithMany()
+                .HasForeignKey(gi => gi.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
 
             modelBuilder.Entity<User>()
                 .HasIndex(u => u.Email)

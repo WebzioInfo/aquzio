@@ -32,7 +32,18 @@ namespace Aquora.Application.Services
             _logger = logger;
         }
 
-        public async Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(string batchNumber, bool full = false, CancellationToken cancellationToken = default)
+        public Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(string batchNumber, bool full = false, CancellationToken cancellationToken = default)
+        {
+            return VerifyBatchAsync(batchNumber, full, null, null, null, cancellationToken);
+        }
+
+        public async Task<PublicBatchVerificationResponseDto> VerifyBatchAsync(
+            string batchNumber,
+            bool full,
+            string? reportType,
+            Guid? tenantId,
+            string? tenantCode,
+            CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(batchNumber))
             {
@@ -46,9 +57,53 @@ namespace Aquora.Application.Services
             }
 
             var normalizedBatch = batchNumber.Trim().ToLowerInvariant();
+            var normalizedReportType = string.IsNullOrWhiteSpace(reportType) ? null : reportType.Trim().ToUpperInvariant();
 
             try
             {
+                // 0. If explicit tenantId or tenantCode is provided, restrict lookup strictly to that tenant
+                if (tenantId.HasValue || !string.IsNullOrWhiteSpace(tenantCode))
+                {
+                    var normalizedTenantCode = tenantCode?.Trim().ToLowerInvariant();
+                    var explicitTenant = await _platformContext.Tenants.AsNoTracking()
+                        .FirstOrDefaultAsync(t =>
+                            t.IsActive &&
+                            !t.IsDeleted &&
+                            t.IsBiodropsProduction &&
+                            !string.IsNullOrWhiteSpace(t.SchemaName) &&
+                            t.SchemaName != "public" &&
+                            (tenantId.HasValue
+                                ? t.Id == tenantId.Value
+                                : (!string.IsNullOrWhiteSpace(t.Code) && t.Code.ToLower() == normalizedTenantCode) ||
+                                  (!string.IsNullOrWhiteSpace(t.Subdomain) && t.Subdomain.ToLower() == normalizedTenantCode)),
+                            cancellationToken);
+
+                    if (explicitTenant == null)
+                    {
+                        return new PublicBatchVerificationResponseDto
+                        {
+                            Success = false,
+                            Verified = false,
+                            Code = "BATCH_NOT_FOUND",
+                            Message = "No matching company or water quality report found for this batch number."
+                        };
+                    }
+
+                    var explicitResult = await VerifyBatchInTenantScopeAsync(explicitTenant, normalizedBatch, batchNumber, full, normalizedReportType, cancellationToken);
+                    if (explicitResult != null)
+                    {
+                        return explicitResult;
+                    }
+
+                    return new PublicBatchVerificationResponseDto
+                    {
+                        Success = false,
+                        Verified = false,
+                        Code = "BATCH_NOT_FOUND",
+                        Message = "No matching water quality report found for this batch number in the specified company."
+                    };
+                }
+
                 // 1. Check if a specific tenant schema is already resolved (e.g. via host header, X-Tenant-Id, etc.)
                 var currentSchema = _tenantProvider.TenantSchemaName;
                 if (!string.IsNullOrWhiteSpace(currentSchema) && !currentSchema.Equals("public", StringComparison.OrdinalIgnoreCase))
@@ -57,7 +112,7 @@ namespace Aquora.Application.Services
                         .FirstOrDefaultAsync(t => t.Id == _tenantProvider.TenantId && t.IsActive && !t.IsDeleted && t.IsBiodropsProduction, cancellationToken);
                     if (preResolvedTenant != null)
                     {
-                        var result = await VerifyBatchInTenantScopeAsync(preResolvedTenant, normalizedBatch, batchNumber, full, cancellationToken);
+                        var result = await VerifyBatchInTenantScopeAsync(preResolvedTenant, normalizedBatch, batchNumber, full, normalizedReportType, cancellationToken);
                         if (result != null)
                         {
                             return result;
@@ -72,21 +127,22 @@ namespace Aquora.Application.Services
                     .ToListAsync(cancellationToken);
 
                 bool anyProductionBatchFound = false;
+                var verifiedMatches = new List<PublicBatchVerificationResponseDto>();
 
                 foreach (var tenant in activeTenants)
                 {
                     try
                     {
-                        var tenantResult = await VerifyBatchInTenantScopeAsync(tenant, normalizedBatch, batchNumber, full, cancellationToken);
+                        var tenantResult = await VerifyBatchInTenantScopeAsync(tenant, normalizedBatch, batchNumber, full, normalizedReportType, cancellationToken);
                         if (tenantResult != null)
                         {
                             if (tenantResult.Code == "REPORT_NOT_PUBLIC")
                             {
                                 anyProductionBatchFound = true;
                             }
-                            else
+                            else if (tenantResult.Success && tenantResult.Verified)
                             {
-                                return tenantResult;
+                                verifiedMatches.Add(tenantResult);
                             }
                         }
                     }
@@ -95,6 +151,25 @@ namespace Aquora.Application.Services
                         _logger.LogError(ex, "[PUBLIC BATCH VERIFICATION ERROR] Failed querying tenant schema '{Schema}' for batch '{BatchNumber}'. Error: {Message}",
                             tenant.SchemaName, batchNumber, ex.Message);
                     }
+                }
+
+                if (verifiedMatches.Count > 1)
+                {
+                    _logger.LogWarning("[PUBLIC BATCH VERIFICATION] Ambiguous batch number '{BatchNumber}' matched {Count} Biodrops tenants.",
+                        batchNumber, verifiedMatches.Count);
+
+                    return new PublicBatchVerificationResponseDto
+                    {
+                        Success = false,
+                        Verified = false,
+                        Code = "AMBIGUOUS_BATCH_NUMBER",
+                        Message = "Multiple companies have a water test report for this batch number. Please specify tenantId or tenantCode."
+                    };
+                }
+
+                if (verifiedMatches.Count == 1)
+                {
+                    return verifiedMatches[0];
                 }
 
                 if (anyProductionBatchFound)
@@ -149,6 +224,7 @@ namespace Aquora.Application.Services
             string normalizedBatch,
             string originalBatchNumber,
             bool full,
+            string? normalizedReportType,
             CancellationToken cancellationToken)
         {
             if (platformTenant == null || !platformTenant.IsBiodropsProduction || !platformTenant.IsActive || platformTenant.IsDeleted)
@@ -177,26 +253,36 @@ namespace Aquora.Application.Services
                 "batch-" + rawBatch
             }.Where(s => !string.IsNullOrWhiteSpace(s)).Select(s => s.ToLowerInvariant()).Distinct().ToList();
 
-            // 1. Query all active (non-deleted) reports associated with this batch number directly from tenant schema
-            var allActiveReports = await dbContext.WaterTestReports
-                .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"WaterTestReports\" WHERE \"IsDeleted\" = false AND \"IsActive\" = true")
+            var v0 = batchVariants.ElementAtOrDefault(0) ?? string.Empty;
+            var v1 = batchVariants.ElementAtOrDefault(1) ?? v0;
+            var v2 = batchVariants.ElementAtOrDefault(2) ?? v0;
+            var v3 = batchVariants.ElementAtOrDefault(3) ?? v0;
+
+            // 1. Query matching active (non-deleted) reports associated with this batch number directly from tenant schema
+            var reports = await dbContext.WaterTestReports
+                .FromSqlRaw(
+                    $"SELECT * FROM \"{schemaName}\".\"WaterTestReports\" WHERE \"IsDeleted\" = false AND \"IsActive\" = true AND LOWER(TRIM(\"BatchNumber\")) IN ({{0}}, {{1}}, {{2}}, {{3}})",
+                    v0, v1, v2, v3)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
-            var reports = allActiveReports
-                .Where(r => !string.IsNullOrWhiteSpace(r.BatchNumber) && batchVariants.Contains(r.BatchNumber.Trim().ToLowerInvariant()))
+            reports = reports
+                .Where(r => string.IsNullOrWhiteSpace(normalizedReportType) ||
+                            string.Equals(r.ReportType?.Trim(), normalizedReportType, StringComparison.OrdinalIgnoreCase))
                 .OrderByDescending(r => r.SampleTime ?? r.CreatedAt)
                 .ThenByDescending(r => r.CreatedAt)
                 .ToList();
 
             if (!reports.Any())
             {
-                var allProdBatches = await dbContext.ProductionBatches
-                    .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"ProductionBatches\" WHERE \"IsDeleted\" = false")
+                var matchingProdBatches = await dbContext.ProductionBatches
+                    .FromSqlRaw(
+                        $"SELECT * FROM \"{schemaName}\".\"ProductionBatches\" WHERE \"IsDeleted\" = false AND LOWER(TRIM(\"BatchNumber\")) IN ({{0}}, {{1}}, {{2}}, {{3}})",
+                        v0, v1, v2, v3)
                     .AsNoTracking()
                     .ToListAsync(cancellationToken);
 
-                var productionBatchExists = allProdBatches.Any(b => !string.IsNullOrWhiteSpace(b.BatchNumber) && batchVariants.Contains(b.BatchNumber.Trim().ToLowerInvariant()));
+                var productionBatchExists = matchingProdBatches.Any();
 
                 if (productionBatchExists)
                 {
@@ -236,7 +322,7 @@ namespace Aquora.Application.Services
 
             // Load results and parameters explicitly from tenant schema
             var resultsList = await dbContext.WaterTestResults
-                .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"WaterTestResults\" WHERE \"ReportId\" = '{report.Id}'")
+                .FromSqlRaw($"SELECT * FROM \"{schemaName}\".\"WaterTestResults\" WHERE \"ReportId\" = {{0}}", report.Id)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
 
@@ -316,10 +402,13 @@ namespace Aquora.Application.Services
             string? amc22Val = null;
             string? amc37Val = null;
             string? yeastMoldVal = null;
-            bool microPassed = true;
-            bool sterilizationPassed = true;
+            bool microFailed = false;
+            bool microPending = false;
+            bool sterilizationFailed = false;
+            bool sterilizationPending = false;
 
             var parameterDtos = new List<PublicWaterTestParameterDto>();
+            var utcNow = DateTime.UtcNow;
 
             if (report.Results != null)
             {
@@ -329,10 +418,43 @@ namespace Aquora.Application.Services
                     var paramDisplayName = res.Parameter?.Name ?? string.Empty;
                     var category = res.Parameter?.Category ?? string.Empty;
                     var unit = res.Parameter?.Unit ?? string.Empty;
+                    var hasResult = res.Value.HasValue || !string.IsNullOrWhiteSpace(res.StringValue);
                     var valStr = !string.IsNullOrWhiteSpace(res.StringValue)
                         ? res.StringValue.Trim()
                         : (res.Value.HasValue ? res.Value.Value.ToString("0.##") : null);
-                    var status = !string.IsNullOrWhiteSpace(res.QualityStatus) ? res.QualityStatus : (res.IsPass ? "PASS" : "FAIL");
+
+                    var requiredDurationHours = res.RequiredDurationHours > 0
+                        ? res.RequiredDurationHours
+                        : (res.Parameter?.RequiredDurationHours ?? 0);
+
+                    string actualResultStatus;
+                    if (hasResult)
+                    {
+                        actualResultStatus = "COMPLETED";
+                    }
+                    else if (requiredDurationHours > 0 || res.ExpectedCompletionAt.HasValue)
+                    {
+                        if ((res.ExpectedCompletionAt.HasValue && utcNow > res.ExpectedCompletionAt.Value) ||
+                            string.Equals(res.ResultStatus, "OVERDUE", StringComparison.OrdinalIgnoreCase))
+                        {
+                            actualResultStatus = "OVERDUE";
+                        }
+                        else
+                        {
+                            actualResultStatus = "IN_PROGRESS";
+                        }
+                    }
+                    else
+                    {
+                        actualResultStatus = string.Equals(res.ResultStatus, "OVERDUE", StringComparison.OrdinalIgnoreCase)
+                            ? "OVERDUE"
+                            : "PENDING_RESULT";
+                    }
+
+                    var isOverdue = actualResultStatus == "OVERDUE";
+                    var qualityStatus = actualResultStatus == "COMPLETED"
+                        ? (!string.IsNullOrWhiteSpace(res.QualityStatus) ? res.QualityStatus : (res.IsPass ? "PASS" : "FAIL"))
+                        : "PENDING";
 
                     string? standard = null;
                     if (res.Parameter != null)
@@ -367,8 +489,14 @@ namespace Aquora.Application.Services
                         Value = res.Value,
                         Unit = unit,
                         Standard = standard,
-                        Status = status,
-                        QualityStatus = status
+                        Status = qualityStatus,
+                        QualityStatus = qualityStatus,
+                        ResultStatus = actualResultStatus,
+                        RequiredDurationHours = requiredDurationHours,
+                        StartedAt = res.StartedAt,
+                        ExpectedCompletionAt = res.ExpectedCompletionAt,
+                        ActualCompletedAt = res.ActualCompletedAt,
+                        IsOverdue = isOverdue
                     });
 
                     if (pName == "ph")
@@ -442,21 +570,39 @@ namespace Aquora.Application.Services
 
                     if (category.ToUpperInvariant() == "MICROBIOLOGY")
                     {
-                        if (res.QualityStatus == "FAIL" || !res.IsPass)
+                        if (actualResultStatus != "COMPLETED")
                         {
-                            microPassed = false;
+                            microPending = true;
+                        }
+                        else if (qualityStatus == "FAIL" || !res.IsPass)
+                        {
+                            microFailed = true;
                         }
                     }
 
                     if (pName.Contains("chlorine") || pName.Contains("steril"))
                     {
-                        if (res.QualityStatus == "FAIL" || !res.IsPass)
+                        if (actualResultStatus != "COMPLETED")
                         {
-                            sterilizationPassed = false;
+                            sterilizationPending = true;
+                        }
+                        else if (qualityStatus == "FAIL" || !res.IsPass)
+                        {
+                            sterilizationFailed = true;
                         }
                     }
                 }
             }
+
+            var totalParametersCount = parameterDtos.Count;
+            var completedParametersCount = parameterDtos.Count(p => p.ResultStatus == "COMPLETED");
+            var overdueParametersCount = parameterDtos.Count(p => p.ResultStatus == "OVERDUE");
+            var pendingParametersCount = totalParametersCount - completedParametersCount;
+            var completionStatus = overdueParametersCount > 0
+                ? "RESULTS_OVERDUE"
+                : (totalParametersCount > 0 && completedParametersCount == totalParametersCount
+                    ? "COMPLETED"
+                    : (completedParametersCount > 0 ? "PARTIALLY_COMPLETED" : "PENDING_RESULTS"));
 
             var companyAddress = !string.IsNullOrWhiteSpace(platformTenant.Address)
                 ? platformTenant.Address
@@ -500,7 +646,13 @@ namespace Aquora.Application.Services
                     TestedBy = full ? report.TestedBy : null,
                     VerifiedBy = full ? report.VerifiedBy : null,
                     CollectedBy = full ? report.CollectedBy : null,
-                    ReportType = full ? report.ReportType : null,
+                    ReportType = report.ReportType,
+                    Status = report.Status,
+                    CompletionStatus = completionStatus,
+                    TotalParametersCount = totalParametersCount,
+                    CompletedParametersCount = completedParametersCount,
+                    PendingParametersCount = pendingParametersCount,
+                    OverdueParametersCount = overdueParametersCount,
                     SampleTime = full && report.SampleTime.HasValue ? report.SampleTime.Value.ToString("dd MMM yyyy, hh:mm tt") : null,
                     CollectedOn = full && report.SampleTime.HasValue ? report.SampleTime.Value.ToString("dd MMM yyyy, hh:mm tt") : null,
                     Remarks = full ? report.Remarks : null,
@@ -557,8 +709,8 @@ namespace Aquora.Application.Services
                         AerobicCount22 = full ? amc22Val : null,
                         AerobicCount37 = full ? amc37Val : null,
                         YeastAndMold = full ? yeastMoldVal : null,
-                        Microbiology = microPassed ? "Passed" : "Failed",
-                        Sterilization = sterilizationPassed ? "Passed" : "Failed"
+                        Microbiology = microFailed ? "Failed" : (microPending ? "Pending" : "Passed"),
+                        Sterilization = sterilizationFailed ? "Failed" : (sterilizationPending ? "Pending" : "Passed")
                     },
                     Parameters = full ? parameterDtos : null,
                     Report = new PublicReportDto

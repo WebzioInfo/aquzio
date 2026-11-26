@@ -791,5 +791,349 @@ namespace Aquora.Application.Services
 
             return report;
         }
+
+        public async Task<ProfitAndLossReportDto> GenerateProfitAndLossAsync(ReportFilterRequest request)
+        {
+            var tenantId = _userContext.TenantId;
+            if (tenantId == Guid.Empty)
+            {
+                throw new UnauthorizedAccessException("Authenticated tenant context is required.");
+            }
+
+            var userOffset = TimeSpan.FromMinutes(-request.TzOffset);
+            var nowUtc = DateTime.UtcNow;
+            var nowLocal = nowUtc.Add(userOffset);
+            var todayLocal = nowLocal.Date;
+
+            var preset = (request.Preset ?? "custom").ToLowerInvariant().Trim();
+            DateTime fromLocal;
+            DateTime toLocal;
+
+            switch (preset)
+            {
+                case "today":
+                    fromLocal = todayLocal;
+                    toLocal = todayLocal;
+                    break;
+                case "yesterday":
+                    fromLocal = todayLocal.AddDays(-1);
+                    toLocal = todayLocal.AddDays(-1);
+                    break;
+                case "7days":
+                case "last7days":
+                    fromLocal = todayLocal.AddDays(-6);
+                    toLocal = todayLocal;
+                    break;
+                case "30days":
+                case "last30days":
+                    fromLocal = todayLocal.AddDays(-29);
+                    toLocal = todayLocal;
+                    break;
+                case "this_month":
+                case "thismonth":
+                    fromLocal = new DateTime(todayLocal.Year, todayLocal.Month, 1);
+                    toLocal = todayLocal;
+                    break;
+                case "last_month":
+                case "lastmonth":
+                    var firstOfThisMonth = new DateTime(todayLocal.Year, todayLocal.Month, 1);
+                    var lastOfPrevMonth = firstOfThisMonth.AddDays(-1);
+                    fromLocal = new DateTime(lastOfPrevMonth.Year, lastOfPrevMonth.Month, 1);
+                    toLocal = lastOfPrevMonth;
+                    break;
+                case "this_year":
+                case "thisyear":
+                    fromLocal = new DateTime(todayLocal.Year, 1, 1);
+                    toLocal = todayLocal;
+                    break;
+                default:
+                    fromLocal = request.DateFrom.HasValue ? request.DateFrom.Value.Date : todayLocal.AddDays(-29);
+                    toLocal = request.DateTo.HasValue ? request.DateTo.Value.Date : todayLocal;
+                    if (fromLocal > toLocal)
+                    {
+                        (fromLocal, toLocal) = (toLocal, fromLocal);
+                    }
+                    break;
+            }
+
+            var fromUtc = fromLocal.Subtract(userOffset);
+            var toUtc = toLocal.AddDays(1).AddMilliseconds(-1).Subtract(userOffset);
+
+            var company = await _tenantContext.Companies
+                .AsNoTracking()
+                .FirstOrDefaultAsync(c => !c.IsDeleted && c.TenantId == tenantId);
+
+            var tenant = await _platformContext.Tenants
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Id == tenantId);
+
+            var resolvedCompanyName = !string.IsNullOrWhiteSpace(company?.Name) && company.Name != "Company"
+                ? company.Name
+                : (tenant?.Name ?? "Aquora Water ERP");
+
+            var currencyCode = !string.IsNullOrWhiteSpace(tenant?.Currency) && !tenant.Currency.Equals("USD", StringComparison.OrdinalIgnoreCase)
+                ? tenant.Currency
+                : "INR";
+
+            var currencySymbol = currencyCode == "INR" ? "₹" : (currencyCode == "USD" ? "$" : currencyCode);
+
+            // 1. SalesTransactions (strictly filtered by business TransactionDate)
+            var salesQuery = _tenantContext.SalesTransactions
+                .Include(s => s.Product)
+                .AsNoTracking()
+                .Where(s => s.TenantId == tenantId && !s.IsDeleted &&
+                    s.TransactionDate >= fromUtc && s.TransactionDate <= toUtc);
+
+            if (request.ProductId.HasValue && request.ProductId.Value != Guid.Empty)
+            {
+                salesQuery = salesQuery.Where(s => s.ProductId == request.ProductId.Value);
+            }
+            if (request.CustomerId.HasValue && request.CustomerId.Value != Guid.Empty)
+            {
+                salesQuery = salesQuery.Where(s => s.CustomerId == request.CustomerId.Value);
+            }
+
+            var salesTxns = await salesQuery.ToListAsync();
+
+            var salesDispatches = salesTxns.Where(s =>
+                string.IsNullOrWhiteSpace(s.TransactionType) ||
+                s.TransactionType.Equals("Sales Dispatch", StringComparison.OrdinalIgnoreCase) ||
+                s.TransactionType.Contains("Sale", StringComparison.OrdinalIgnoreCase) ||
+                s.TransactionType.Contains("Dispatch", StringComparison.OrdinalIgnoreCase))
+                .Where(s => !s.TransactionType.Contains("Return", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            var salesReturns = salesTxns.Where(s =>
+                s.TransactionType.Contains("Return", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            var salesDamages = salesTxns.Where(s =>
+                s.TransactionType.Equals("Damage", StringComparison.OrdinalIgnoreCase) ||
+                s.TransactionType.Equals("Damaged Goods", StringComparison.OrdinalIgnoreCase)).ToList();
+
+            decimal salesGrossExclGst = salesDispatches.Sum(s =>
+            {
+                var total = s.TotalAmount > 0 ? s.TotalAmount : (s.Cases * s.UnitPrice);
+                return Math.Max(0m, total - s.TaxAmount);
+            });
+            decimal salesDiscounts = salesDispatches.Sum(s => s.DiscountAmount);
+            decimal salesGrossBeforeDiscount = salesGrossExclGst + salesDiscounts;
+            decimal salesOutputGst = salesDispatches.Sum(s => s.TaxAmount);
+            decimal salesReturnsTotal = salesReturns.Sum(r => r.ReturnedAmount > 0 ? r.ReturnedAmount : (r.Cases * r.UnitPrice));
+            decimal salesDamageLoss = salesDamages.Sum(d =>
+                d.DamageCost > 0 ? d.DamageCost : (d.Cases * (d.Product != null && d.Product.CostPrice > 0 ? d.Product.CostPrice : 0m)));
+
+            // 2. 20L Deliveries (only unlinked to SalesTransactions and not cancelled) & Commissions
+            var twentyLQuery = _tenantContext.TwentyLDeliveries
+                .AsNoTracking()
+                .Where(d => d.TenantId == tenantId &&
+                    d.Status != "CANCELLED" &&
+                    d.SalesTransactionId == null &&
+                    d.DeliveredAt >= fromUtc && d.DeliveredAt <= toUtc);
+
+            if (request.ProductId.HasValue && request.ProductId.Value != Guid.Empty)
+            {
+                twentyLQuery = twentyLQuery.Where(d => d.ProductId == request.ProductId.Value);
+            }
+            if (request.CustomerId.HasValue && request.CustomerId.Value != Guid.Empty)
+            {
+                twentyLQuery = twentyLQuery.Where(d => d.CustomerId == request.CustomerId.Value);
+            }
+
+            var twentyLDeliveries = await twentyLQuery.ToListAsync();
+            decimal twentyLGrossExclGst = twentyLDeliveries.Sum(d => Math.Max(0m, d.TotalAmount - d.TaxAmount));
+            decimal twentyLDiscounts = twentyLDeliveries.Sum(d => d.DiscountAmount);
+            decimal twentyLGrossBeforeDiscount = twentyLGrossExclGst + twentyLDiscounts;
+            decimal twentyLOutputGst = twentyLDeliveries.Sum(d => d.TaxAmount);
+
+            var twentyLCommissions = await _tenantContext.TwentyLCommissionTransactions
+                .AsNoTracking()
+                .Where(c => c.TenantId == tenantId && c.OccurredAt >= fromUtc && c.OccurredAt <= toUtc)
+                .SumAsync(c => (decimal?)c.Amount) ?? 0m;
+
+            // 3. Purchases (classified by PurchaseCategory.Treatment; strictly PurchaseDate)
+            var categoryTreatments = await _tenantContext.PurchaseCategories
+                .AsNoTracking()
+                .Where(c => c.TenantId == tenantId && !c.IsDeleted)
+                .ToDictionaryAsync(c => c.Code, c => c.Treatment, StringComparer.OrdinalIgnoreCase);
+
+            string ResolveTreatment(string categoryCode)
+            {
+                if (!string.IsNullOrWhiteSpace(categoryCode) && categoryTreatments.TryGetValue(categoryCode.Trim(), out var t))
+                    return t;
+                if (string.Equals(categoryCode, "RawMaterial", StringComparison.OrdinalIgnoreCase)) return "Inventory";
+                if (string.Equals(categoryCode, "Machine", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(categoryCode, "OfficeAsset", StringComparison.OrdinalIgnoreCase)) return "Asset";
+                return "Expense";
+            }
+
+            var purchases = await _tenantContext.Purchases
+                .AsNoTracking()
+                .Where(p => p.TenantId == tenantId && !p.IsDeleted &&
+                    p.PurchaseDate >= fromUtc && p.PurchaseDate <= toUtc)
+                .ToListAsync();
+
+            var cancelledPurchasesExcluded = purchases.Where(p => p.IsCancelled).Sum(p => p.GrandTotal);
+            var activePurchases = purchases.Where(p => !p.IsCancelled).ToList();
+
+            decimal GetPurchaseExclGst(Purchase p) =>
+                p.TaxableAmount > 0 ? p.TaxableAmount : Math.Max(0m, p.GrandTotal - p.TaxAmount);
+
+            var inventoryPurchases = activePurchases.Where(p => ResolveTreatment(p.PurchaseCategory) == "Inventory").ToList();
+            var assetPurchases = activePurchases.Where(p => ResolveTreatment(p.PurchaseCategory) == "Asset").ToList();
+            var expensePurchases = activePurchases.Where(p => ResolveTreatment(p.PurchaseCategory) == "Expense").ToList();
+
+            decimal materialPurchasesTotal = inventoryPurchases.Sum(GetPurchaseExclGst);
+            decimal capExExcludedTotal = assetPurchases.Sum(GetPurchaseExclGst);
+            decimal inputGstOnPnlPurchases = inventoryPurchases.Sum(p => p.TaxAmount) + expensePurchases.Sum(p => p.TaxAmount);
+
+            var expensePurchasesByCategory = expensePurchases
+                .GroupBy(p => string.IsNullOrWhiteSpace(p.PurchaseCategory) ? "Other" : p.PurchaseCategory)
+                .Select(g => new ExpenseCategorySummaryDto
+                {
+                    Category = g.Key,
+                    TotalAmount = g.Sum(GetPurchaseExclGst),
+                    Count = g.Count()
+                })
+                .OrderByDescending(x => x.TotalAmount)
+                .ToList();
+
+            decimal totalExpensePurchases = expensePurchasesByCategory.Sum(x => x.TotalAmount);
+
+            // 4. SimpleExpenses (strictly ExpenseDate)
+            var simpleExpenses = await _tenantContext.SimpleExpenses
+                .AsNoTracking()
+                .Where(e => e.TenantId == tenantId && !e.IsDeleted &&
+                    e.ExpenseDate >= fromUtc && e.ExpenseDate <= toUtc)
+                .ToListAsync();
+
+            var simpleExpensesByCategory = simpleExpenses
+                .GroupBy(e => string.IsNullOrWhiteSpace(e.Category) ? "Miscellaneous" : e.Category.Trim())
+                .Select(g => new ExpenseCategorySummaryDto
+                {
+                    Category = g.Key,
+                    TotalAmount = g.Sum(x => x.Amount),
+                    Count = g.Count()
+                })
+                .OrderByDescending(x => x.TotalAmount)
+                .ToList();
+
+            decimal totalSimpleExpenses = simpleExpensesByCategory.Sum(x => x.TotalAmount);
+            decimal simpleExpensesSalaryOverlap = simpleExpenses
+                .Where(e => e.Category.Equals("Salary", StringComparison.OrdinalIgnoreCase))
+                .Sum(e => e.Amount);
+
+            // 5. SalaryPayments (strictly PaymentDate)
+            decimal salariesPaid = await _tenantContext.SalaryPayments
+                .AsNoTracking()
+                .Where(s => s.TenantId == tenantId && !s.IsDeleted &&
+                    s.PaymentDate >= fromUtc && s.PaymentDate <= toUtc)
+                .SumAsync(s => (decimal?)s.Amount) ?? 0m;
+
+            // 6. Check Depreciation events in period (disclosure only, Pre-Depreciation P&L)
+            int depreciationEventsCount = await _tenantContext.AssetHistories
+                .Include(h => h.Asset)
+                .AsNoTracking()
+                .Where(h => h.Asset.TenantId == tenantId && !h.Asset.IsDeleted &&
+                    h.Action == "Depreciation Applied" &&
+                    h.Date >= fromUtc && h.Date <= toUtc)
+                .CountAsync();
+
+            // 7. Compute P&L Totals
+            decimal totalGrossBeforeDiscount = salesGrossBeforeDiscount + twentyLGrossBeforeDiscount;
+            decimal totalDiscounts = salesDiscounts + twentyLDiscounts;
+            decimal netSalesRevenue = totalGrossBeforeDiscount - totalDiscounts - salesReturnsTotal;
+
+            decimal totalDirectCosts = materialPurchasesTotal + salesDamageLoss + twentyLCommissions;
+            decimal grossProfit = netSalesRevenue - totalDirectCosts;
+            decimal grossMarginPct = netSalesRevenue > 0 ? Math.Round((grossProfit / netSalesRevenue) * 100m, 2) : 0m;
+
+            decimal totalOperatingExpenses = totalSimpleExpenses + totalExpensePurchases + salariesPaid;
+            decimal operatingProfit = grossProfit - totalOperatingExpenses;
+            decimal netProfit = operatingProfit;
+            decimal netMarginPct = netSalesRevenue > 0 ? Math.Round((netProfit / netSalesRevenue) * 100m, 2) : 0m;
+
+            var disclosures = new List<string>
+            {
+                "Basis: Operational / Period-Purchase P&L. Direct material costs reflect non-cancelled Inventory purchases in the period rather than FIFO/weighted-average COGS.",
+                "GST Treatment: Sales Revenue and Purchases are shown net of GST. Output GST collected and Input GST on purchases are listed separately in the Informational section.",
+                "Non-P&L Exclusions: Owner investments/withdrawals, bank deposits/transfers, cashbook settlements, and CapEx (Machine/OfficeAsset) purchases are excluded."
+            };
+
+            if (depreciationEventsCount > 0)
+            {
+                disclosures.Add($"Pre-Depreciation P&L: {depreciationEventsCount} asset depreciation event(s) occurred in this period and are not deducted above.");
+            }
+            if (simpleExpensesSalaryOverlap > 0 && salariesPaid > 0)
+            {
+                disclosures.Add($"Potential Overlap Notice: Both Payroll Salary Payments ({currencySymbol}{salariesPaid:N2}) and Simple Expenses categorized as 'Salary' ({currencySymbol}{simpleExpensesSalaryOverlap:N2}) exist in this period.");
+            }
+
+            return new ProfitAndLossReportDto
+            {
+                Period = new ReportPeriodDto
+                {
+                    DateFromUtc = fromUtc,
+                    DateToUtc = toUtc,
+                    FormattedRange = $"{fromLocal:dd MMM yyyy} — {toLocal:dd MMM yyyy}",
+                    GeneratedAtLocal = $"{nowLocal:dd MMM yyyy, hh:mm tt}",
+                    Preset = preset
+                },
+                Company = new CompanyReportInfoDto
+                {
+                    Name = resolvedCompanyName,
+                    DisplayName = resolvedCompanyName,
+                    Email = tenant?.OwnerEmail,
+                    Phone = tenant?.OwnerPhone,
+                    GstNumber = tenant?.GstNumber,
+                    Address = tenant?.Address,
+                    LogoUrl = tenant?.LogoUrl,
+                    Currency = currencyCode,
+                    CurrencySymbol = currencySymbol
+                },
+                Revenue = new ProfitAndLossRevenueDto
+                {
+                    SalesGrossBeforeDiscount = salesGrossBeforeDiscount,
+                    TwentyLGrossBeforeDiscount = twentyLGrossBeforeDiscount,
+                    TotalGrossBeforeDiscount = totalGrossBeforeDiscount,
+                    TotalDiscounts = totalDiscounts,
+                    SalesReturns = salesReturnsTotal,
+                    NetSalesRevenue = netSalesRevenue,
+                    SalesOrdersCount = salesDispatches.Count,
+                    TwentyLDeliveriesCount = twentyLDeliveries.Count,
+                    ReturnsCount = salesReturns.Count
+                },
+                DirectCosts = new ProfitAndLossDirectCostsDto
+                {
+                    MaterialPurchases = materialPurchasesTotal,
+                    SalesDamageLoss = salesDamageLoss,
+                    TwentyLCommissions = twentyLCommissions,
+                    TotalDirectCosts = totalDirectCosts
+                },
+                GrossProfit = grossProfit,
+                GrossMarginPercent = grossMarginPct,
+                OperatingExpenses = new ProfitAndLossOperatingExpensesDto
+                {
+                    SimpleExpensesByCategory = simpleExpensesByCategory,
+                    TotalSimpleExpenses = totalSimpleExpenses,
+                    ExpensePurchasesByCategory = expensePurchasesByCategory,
+                    TotalExpensePurchases = totalExpensePurchases,
+                    SalariesPaid = salariesPaid,
+                    TotalOperatingExpenses = totalOperatingExpenses
+                },
+                OperatingProfit = operatingProfit,
+                NetProfit = netProfit,
+                NetMarginPercent = netMarginPct,
+                Informational = new ProfitAndLossInformationalDto
+                {
+                    OutputGstCollected = salesOutputGst + twentyLOutputGst,
+                    InputGstOnPurchases = inputGstOnPnlPurchases,
+                    CapExAssetPurchasesExcluded = capExExcludedTotal,
+                    CancelledPurchasesExcluded = cancelledPurchasesExcluded,
+                    DepreciationEventsCount = depreciationEventsCount,
+                    SimpleExpensesSalaryOverlapAmount = simpleExpensesSalaryOverlap
+                },
+                Disclosures = disclosures
+            };
+        }
     }
 }

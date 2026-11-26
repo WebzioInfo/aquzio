@@ -223,7 +223,7 @@ export const WaterTestReportFormPage: React.FC = () => {
       return freq === 'DAILY';
     }
     if (reportType === 'WEEKLY') {
-      return freq === 'DAILY' || freq === 'WEEKLY';
+      return freq === 'WEEKLY';
     }
     // MONTHLY or EXTERNAL_LAB includes all
     return true;
@@ -289,25 +289,24 @@ export const WaterTestReportFormPage: React.FC = () => {
     isSavingRef.current = true;
     setIsSaving(true);
     try {
-      const allFormParameters = parameters.length > 0 ? parameters : [...physicalChemicalParams, ...microParams];
+      const requiredFormParameters = [...physicalChemicalParams, ...microParams];
       const deduplicatedPayloadMap = new Map<string, { id?: string; parameterId: string; value: number | null; stringValue: string | null }>();
 
-      allFormParameters.forEach(param => {
+      requiredFormParameters.forEach(param => {
         const res = getParamResult(param);
-        if (!res) return;
+        const valNum = res?.value && res.value.trim() !== '' ? parseFloat(res.value) : null;
+        const strVal = res?.stringValue && res.stringValue.trim() !== '' ? res.stringValue.trim() : null;
+        const hasVal = (valNum !== null && !isNaN(valNum)) || strVal !== null;
 
-        const valNum = res.value && res.value.trim() !== '' ? parseFloat(res.value) : null;
-        const strVal = res.stringValue && res.stringValue.trim() !== '' ? res.stringValue.trim() : null;
+        const normKey = param.name.toLowerCase().trim();
+        if (deduplicatedPayloadMap.has(normKey)) return;
 
-        if ((valNum !== null && !isNaN(valNum)) || strVal !== null) {
-          const key = param.id || param.name;
-          deduplicatedPayloadMap.set(param.name.toLowerCase().trim(), {
-            id: (res as any)?.id || undefined,
-            parameterId: key,
-            value: (valNum !== null && !isNaN(valNum)) ? valNum : null,
-            stringValue: strVal
-          });
-        }
+        deduplicatedPayloadMap.set(normKey, {
+          id: (res as any)?.id || undefined,
+          parameterId: param.id || param.name,
+          value: hasVal && valNum !== null && !isNaN(valNum) ? valNum : null,
+          stringValue: hasVal ? strVal : null
+        });
       });
 
       const mappedResults = Array.from(deduplicatedPayloadMap.values());

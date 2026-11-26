@@ -7,6 +7,8 @@ namespace Aquora.Application.DTOs.Media
     {
         UserProfilePhoto,
         CompanyLogo,
+        CompanyCover,
+        CompanyGallery,
         QcSignature,
         QcProfilePhoto,
         Document,
