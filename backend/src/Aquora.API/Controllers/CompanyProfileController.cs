@@ -575,14 +575,24 @@ namespace Aquora.API.Controllers
                 _platformContext.CompanyPublicProfiles.Add(profile);
             }
 
-            profile.CoverImageUrl = img.ImageUrl;
-            profile.CoverImagePublicId = img.StorageKey;
+            var isCurrentlyCover = string.Equals(profile.CoverImageUrl, img.ImageUrl, StringComparison.OrdinalIgnoreCase);
+            if (isCurrentlyCover)
+            {
+                profile.CoverImageUrl = null;
+                profile.CoverImagePublicId = null;
+            }
+            else
+            {
+                profile.CoverImageUrl = img.ImageUrl;
+                profile.CoverImagePublicId = img.StorageKey;
+            }
+
             profile.UpdatedAt = DateTime.UtcNow;
             profile.UpdatedBy = userIdStr;
 
             await _platformContext.SaveChangesAsync(cancellationToken);
 
-            return Success(MapProfileDto(tenant, profile), "Company cover image updated.");
+            return Success(MapProfileDto(tenant, profile), isCurrentlyCover ? "Company cover image removed." : "Company cover image updated.");
         }
 
         [HttpPost("gallery/{id:guid}/set-logo")]
@@ -618,8 +628,18 @@ namespace Aquora.API.Controllers
                 return NotFound(Failure<CompanyProfileDto>("Tenant not found.", "NotFound"));
             }
 
-            tenant.LogoUrl = img.ImageUrl;
-            tenant.LogoPublicId = img.StorageKey;
+            var isCurrentlyLogo = string.Equals(tenant.LogoUrl, img.ImageUrl, StringComparison.OrdinalIgnoreCase);
+            if (isCurrentlyLogo)
+            {
+                tenant.LogoUrl = null;
+                tenant.LogoPublicId = null;
+            }
+            else
+            {
+                tenant.LogoUrl = img.ImageUrl;
+                tenant.LogoPublicId = img.StorageKey;
+            }
+
             tenant.UpdatedAt = DateTime.UtcNow;
             tenant.UpdatedBy = _userContext.UserId ?? "System";
 
@@ -629,7 +649,7 @@ namespace Aquora.API.Controllers
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.TenantId == tenantId, cancellationToken);
 
-            return Success(MapProfileDto(tenant, profile), "Company logo updated.");
+            return Success(MapProfileDto(tenant, profile), isCurrentlyLogo ? "Company logo removed." : "Company logo updated.");
         }
 
         [HttpDelete("gallery/{id:guid}")]

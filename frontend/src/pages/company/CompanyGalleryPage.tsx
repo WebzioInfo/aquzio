@@ -162,23 +162,23 @@ export const CompanyGalleryPage: React.FC = () => {
     }
   }
 
-  const handleSetCover = async (id: string) => {
+  const handleSetCover = async (id: string, wasCover: boolean) => {
     try {
       const updated = await companyProfileApi.setAsCover(id)
       setProfile(updated)
-      showToast('Cover image updated.', 'success')
+      showToast(wasCover ? 'Cover image removed.' : 'Cover image updated.', 'success')
     } catch (err: any) {
-      showToast(err.message || 'Failed to set cover image.', 'error')
+      showToast(err.message || 'Failed to update cover image.', 'error')
     }
   }
 
-  const handleSetLogo = async (id: string) => {
+  const handleSetLogo = async (id: string, wasLogo: boolean) => {
     try {
       const updated = await companyProfileApi.setAsLogo(id)
       setProfile(updated)
-      showToast('Company logo updated.', 'success')
+      showToast(wasLogo ? 'Company logo removed.' : 'Company logo updated.', 'success')
     } catch (err: any) {
-      showToast(err.message || 'Failed to set company logo.', 'error')
+      showToast(err.message || 'Failed to update company logo.', 'error')
     }
   }
 
@@ -491,19 +491,29 @@ export const CompanyGalleryPage: React.FC = () => {
                       <div className="flex items-center gap-1">
                         <button
                           type="button"
-                          onClick={() => handleSetCover(img.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-teal-50 hover:bg-teal-100 text-teal-700 text-[11px] font-semibold cursor-pointer"
+                          onClick={() => handleSetCover(img.id, isCover)}
+                          title={isCover ? 'Remove cover image' : 'Set as cover image'}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
+                            isCover
+                              ? 'bg-teal-600 hover:bg-teal-700 text-white'
+                              : 'bg-teal-50 hover:bg-teal-100 text-teal-700'
+                          }`}
                         >
                           <Star className="w-3 h-3" />
-                          Cover
+                          {isCover ? 'Remove Cover' : 'Cover'}
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleSetLogo(img.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-[11px] font-semibold cursor-pointer"
+                          onClick={() => handleSetLogo(img.id, isLogo)}
+                          title={isLogo ? 'Remove company logo' : 'Set as company logo'}
+                          className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-semibold cursor-pointer ${
+                            isLogo
+                              ? 'bg-slate-800 hover:bg-slate-900 text-white'
+                              : 'bg-slate-100 hover:bg-slate-200 text-slate-800'
+                          }`}
                         >
                           <Shield className="w-3 h-3" />
-                          Logo
+                          {isLogo ? 'Remove Logo' : 'Logo'}
                         </button>
                         <button
                           type="button"
